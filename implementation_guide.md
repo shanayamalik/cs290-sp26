@@ -9,50 +9,15 @@
 
 ## ✅ Phase 1: Environment Setup — COMPLETE
 
-See `merge_env.py` and the setup instructions in [README.md](README.md). Confirmed working: observation shape `(5, 5)` (5 vehicles × 5 features), render window opens, vehicle states readable via `env.unwrapped.road.vehicles`. Note: use `env.unwrapped` to access highway-env internals through gymnasium's wrappers — `env.road` will raise an `AttributeError`.
+See [README.md](README.md). Note: use `env.unwrapped` to access highway-env internals through gymnasium's wrappers — `env.road` will raise an `AttributeError`.
 
 ---
 
-## Phase 2: Driver Types
-**Goal:** Define three reward archetypes. Assign them to non-ego vehicles using IDM parameters.
+## Phase 2: Driver Types — IN PROGRESS
 
-### Step 3 — Implement driver types
+See `driver_types.py`. Three types implemented (cautious, normal, aggressive) by overriding IDM parameters on `IDMVehicle` instances. Parameters calibrated from Treiber et al. (2000) and Schwarting et al. (2019) SVO taxonomy — see module docstring for citations.
 
-Create `driver_types.py`:
-
-```python
-from highway_env.vehicle.behavior import IDMVehicle
-
-def make_cautious(vehicle: IDMVehicle) -> None:
-    """Large headway, low speed, high smoothness."""
-    vehicle.COMFORT_ACC_MAX = 2.0   # m/s^2
-    vehicle.COMFORT_ACC_MIN = -3.0
-    vehicle.TIME_WANTED = 2.5       # seconds headway
-    vehicle.DISTANCE_WANTED = 10.0  # meters
-    vehicle.DELTA = 4               # sensitivity exponent
-
-def make_normal(vehicle: IDMVehicle) -> None:
-    """Balanced behavior."""
-    vehicle.COMFORT_ACC_MAX = 3.0
-    vehicle.COMFORT_ACC_MIN = -5.0
-    vehicle.TIME_WANTED = 1.5
-    vehicle.DISTANCE_WANTED = 5.0
-    vehicle.DELTA = 4
-
-def make_aggressive(vehicle: IDMVehicle) -> None:
-    """Short headway, high speed priority."""
-    vehicle.COMFORT_ACC_MAX = 4.0
-    vehicle.COMFORT_ACC_MIN = -6.0
-    vehicle.TIME_WANTED = 1.0       # keep >= 1.0 to avoid spurious collisions early on
-    vehicle.DISTANCE_WANTED = 2.0
-    vehicle.DELTA = 4
-```
-
-> **Note:** These are fixed, hand-defined weight vectors — not learned via IRL. This is a deliberate scope reduction. The methods section should state this explicitly and note that real-time driver type estimation (e.g., SVO inference per Schwarting et al.) is future work.
-
-### Step 4 — Assign driver types after reset
-
-In any script that creates an environment, assign types to non-ego vehicles after `env.reset()`:
+**Remaining:** Add driver type assignment to `merge_env.py` after `env.reset()`, then verify visually distinct behavior before marking complete.
 
 ```python
 import random
@@ -61,18 +26,18 @@ from driver_types import make_cautious, make_normal, make_aggressive
 driver_fns = [make_cautious, make_normal, make_aggressive]
 
 obs, info = env.reset()
-for vehicle in env.road.vehicles[1:]:  # index 0 is always ego
+for vehicle in env.unwrapped.road.vehicles[1:]:  # index 0 is always ego
     random.choice(driver_fns)(vehicle)
 ```
 
-**Done when:** Running a few episodes shows visually distinct behavior — cautious vehicles hang back, aggressive ones push into gaps.
+**Done when:** Cautious vehicles hang back, aggressive ones push into gaps.
 
 ---
 
 ## Phase 3: Reward Functions
 **Goal:** Implement a feature-based reward function that supports all three driver types.
 
-### Step 5 — Implement reward features
+### Implement reward features
 
 Create `reward.py`. The reward for agent $i$ is $r_i = \theta_i^\top f(s_t, u_t)$, where $f$ has six components:
 
@@ -113,7 +78,7 @@ def ego_reward(state: dict, action: np.ndarray, prev_action: np.ndarray, theta: 
 
 This is the most time-intensive phase. Prioritize it for the May 8 presentation — the MPC trajectories alone are sufficient preliminary results.
 
-### Step 6 — Iterative best-response prediction
+### Iterative best-response prediction
 
 Create `best_response.py`. The algorithm:
 
@@ -195,7 +160,7 @@ def idm_predict(vehicle, ego_trajectory: np.ndarray, all_predicted: list[np.ndar
     return np.array(traj)
 ```
 
-### Step 7 — MPC action selection
+### MPC action selection
 
 Create `mpc_expert.py`. For each timestep, sample N action sequences over the planning horizon, simulate ego dynamics, score using `ego_reward`, return the best first action.
 
@@ -264,7 +229,7 @@ def _min_distance(ego_pos: np.ndarray, others: list[np.ndarray], t: int) -> floa
 ## Phase 5: Expert Dataset Generation
 **Goal:** Collect (observation, action) pairs from the MPC expert across diverse scenarios.
 
-### Step 8 — Generate and save the dataset
+### Generate and save the dataset
 
 Create `generate_data.py`:
 
@@ -317,7 +282,7 @@ print(f"Dataset saved: {len(dataset)} transitions")
 ## Phase 6: Behavioral Cloning (Policy Distillation)
 **Goal:** Train a neural network to imitate the MPC expert via supervised learning.
 
-### Step 9 — Define the policy network
+### Define the policy network
 
 Create `policy_network.py`:
 
@@ -342,7 +307,7 @@ class PolicyNetwork(nn.Module):
         return self.net(x)
 ```
 
-### Step 10 — Train via behavioral cloning
+### Train via behavioral cloning
 
 Create `train_policy.py`:
 
@@ -398,7 +363,7 @@ print("Saved distilled_policy.pt")
 
 Warm-starting PPO from the behavioral cloning weights is the methodologically important step — it must be implemented properly, not left as a comment.
 
-### Step 11 — Fine-tune with PPO
+### Fine-tune with PPO
 
 Create `rl_finetune.py`:
 
