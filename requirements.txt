@@ -1,0 +1,15 @@
+# Core simulation
+highway-env>=1.10.2
+gymnasium>=1.0
+
+# Numerical / scientific
+numpy>=1.21,<2.0
+scipy>=1.9
+matplotlib>=3.5
+
+# Deep learning (CPU-only — no GPU required)
+# If you have a GPU, remove the --index-url line and just install torch>=2.0
+torch>=2.0 --index-url https://download.pytorch.org/whl/cpu
+
+# Reinforcement learning
+stable-baselines3>=2.0
