@@ -33,3 +33,9 @@ To verify the environment is working:
 ```bash
 python3 -c "import highway_env, gymnasium, torch, stable_baselines3; print('All dependencies OK')"
 ```
+
+Then run the environment sanity check (a render window with cars should appear, and the terminal will print the observation shape and vehicle states):
+
+```bash
+python3 merge_env.py
+```

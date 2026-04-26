@@ -3,59 +3,13 @@
 
 **Deadline:** Presentation — May 8, 2026 | Final Report — May 15, 2026
 
-This guide is the authoritative implementation plan. Follow phases in order. Each phase has a clear goal, concrete files to create, and a definition of done.
+> **Before starting:** Follow the setup instructions in [README.md](README.md) to create a virtual environment and install all dependencies. The phases below assume `venv` is active.
 
 ---
 
-## Dependencies
+## ✅ Phase 1: Environment Setup — COMPLETE
 
-```bash
-pip install highway-env gymnasium numpy matplotlib scipy torch stable-baselines3
-```
-
-No GPU required. Everything runs on CPU.
-
-**Simulator:** Highway-Env (`merge-v0`) — do not build a custom simulator.
-
----
-
-## Phase 1: Environment Setup
-**Goal:** Confirm you can run the merge environment, control vehicles, and read all agent states.
-
-### Step 1 — Run merge-v0 with random actions
-
-Create `merge_env.py`:
-
-```python
-import gymnasium as gym
-import highway_env  # noqa: F401 — registers environments
-
-env = gym.make("merge-v0", render_mode="human", config={
-    "vehicles_count": 3,
-    "controlled_vehicles": 1,
-    "lanes_count": 2,
-    "duration": 20,
-    "collision_reward": -10,
-    "high_speed_reward": 0.4,
-})
-
-obs, info = env.reset()
-print("Observation shape:", obs.shape)
-
-for _ in range(200):
-    action = env.action_space.sample()
-    obs, reward, terminated, truncated, info = env.step(action)
-    if terminated or truncated:
-        obs, info = env.reset()
-
-env.close()
-```
-
-**Done when:** A render window opens, the ego vehicle (green) moves, and the observation shape prints without error.
-
-### Step 2 — Inspect vehicle states
-
-After `env.reset()`, print `env.road.vehicles` to confirm you can read positions, speeds, and lane indices for all vehicles. The ego vehicle is always `env.road.vehicles[0]`.
+See `merge_env.py` and the setup instructions in [README.md](README.md). Confirmed working: observation shape `(5, 5)` (5 vehicles × 5 features), render window opens, vehicle states readable via `env.unwrapped.road.vehicles`. Note: use `env.unwrapped` to access highway-env internals through gymnasium's wrappers — `env.road` will raise an `AttributeError`.
 
 ---
 
