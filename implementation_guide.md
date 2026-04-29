@@ -13,24 +13,11 @@ See [README.md](README.md). Note: use `env.unwrapped` to access highway-env inte
 
 ---
 
-## Phase 2: Driver Types — IN PROGRESS
+## ✅ Phase 2: Driver Types — COMPLETE
 
 See `driver_types.py`. Three types implemented (cautious, normal, aggressive) by overriding IDM parameters on `IDMVehicle` instances. Normal driver uses Treiber et al. (2000) reference values (T=1.5 s, s0=2 m, delta=4); cautious and aggressive are scaled relative to normal. SVO taxonomy mapping from Schwarting et al. (2019) — see module docstring for full citations and DOIs.
 
-**Remaining:** Add driver type assignment to `merge_env.py` after `env.reset()`, then verify visually distinct behavior before marking complete.
-
-```python
-import random
-from driver_types import make_cautious, make_normal, make_aggressive
-
-driver_fns = [make_cautious, make_normal, make_aggressive]
-
-obs, info = env.reset()
-for vehicle in env.unwrapped.road.vehicles[1:]:  # index 0 is always ego
-    random.choice(driver_fns)(vehicle)
-```
-
-**Done when:** Cautious vehicles hang back, aggressive ones push into gaps.
+Driver types are randomly assigned to non-ego vehicles in `merge_env.py` via `assign_driver_types()` after every `env.reset()`. Vehicles[0] is always ego; vehicles[1:] receive a random archetype.
 
 ---
 
