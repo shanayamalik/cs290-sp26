@@ -15,7 +15,7 @@ See [README.md](README.md). Note: use `env.unwrapped` to access highway-env inte
 
 ## Phase 2: Driver Types — IN PROGRESS
 
-See `driver_types.py`. Three types implemented (cautious, normal, aggressive) by overriding IDM parameters on `IDMVehicle` instances. Parameters calibrated from Treiber et al. (2000) and Schwarting et al. (2019) SVO taxonomy — see module docstring for citations.
+See `driver_types.py`. Three types implemented (cautious, normal, aggressive) by overriding IDM parameters on `IDMVehicle` instances. Normal driver uses Treiber et al. (2000) reference values (T=1.5 s, s0=2 m, delta=4); cautious and aggressive are scaled relative to normal. SVO taxonomy mapping from Schwarting et al. (2019) — see module docstring for full citations and DOIs.
 
 **Remaining:** Add driver type assignment to `merge_env.py` after `env.reset()`, then verify visually distinct behavior before marking complete.
 
