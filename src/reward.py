@@ -40,7 +40,7 @@ import numpy as np
 #   Bae et al. (2020). Smaller than smoothness; second-order comfort term.
 #
 # collision (-1000.0 / -1000.0 / -1000.0)
-#   Feature = -1 if collision else 0. -1000 chosen so collision cost exceeds
+#   Feature = +1 if collision else 0. -1000 chosen so collision cost exceeds
 #   max cumulative per-step reward at any horizon: 50 steps * max weight 0.9
 #   = 45 << 1000. No per-step gain can justify a crash (Leurent 2019,
 #   Sadigh et al. 2016). Identical across types -- all drivers avoid crashes.
@@ -105,7 +105,7 @@ def compute_features(
     proximity_penalty = 1.0 / max(state["d_min"] ** 2, 0.1)
     smoothness = -(action[0] ** 2)
     jerk = -((action[0] - prev_action[0]) / dt) ** 2
-    collision = -1.0 if state.get("collision", False) else 0.0
+    collision = 1.0 if state.get("collision", False) else 0.0
     lane_deviation = -((state["y"] - state["y_target"]) ** 2)
 
     return np.array([forward_progress, proximity_penalty, smoothness, jerk, collision, lane_deviation])

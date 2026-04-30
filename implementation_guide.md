@@ -31,6 +31,8 @@ See [src/reward.py](src/reward.py). The reward is $r_i = \theta_i^\top f(s_t, u_
 - **collision (−1000, all types):** dominates any horizon (50 steps × max 0.9 = 45 << 1000); no per-step gain justifies a crash
 - **lane_deviation (−0.5/−0.3/−0.1):** y_target must be the *target* lane center, not current lane
 
+**April 30 fix:** collision is encoded as `+1` when a predicted collision occurs and `0` otherwise. With the universal `−1000` weight, this produces a large negative penalty. The previous encoding used `−1`, which accidentally made collision contribute `+1000` to the reward.
+
 ---
 
 ## ✅ Phase 4: MPC Expert (Iterative Best-Response) — COMPLETE
@@ -62,16 +64,23 @@ See `src/generate_data.py`. Committed to `naya` branch.
 - `ego_speed` and `d_min` saved per step for trajectory plots without decoding obs
 - `theta_name` saved as string for type-conditioned analysis
 
-**Results (200 episodes):**
-- 3564 total transitions, 3169 clean (non-crashed)
-- 26.5% crash rate — dominated by spawn collisions (terminated within 4–8 steps); MPC had no time to react
-- Clean transitions per type: cautious 968, normal 1209, aggressive 992 (well-balanced, ≤1.25× ratio)
-- Saved to `data/expert_dataset.pkl` (excluded from git via `.gitignore`)
+**Fixed-reward results (200 episodes each, regenerated April 30):**
+
+| Dataset | Non-ego driver mix | Records | Clean records | Crashes | Crash rate |
+|---|---|---:|---:|---:|---:|
+| `data/expert_dataset_all_normal.pkl` | 100% normal | 9703 | 9695 | 1 / 200 | 0.5% |
+| `data/expert_dataset_default_mix.pkl` | 60% normal, 20% cautious, 20% aggressive | 9485 | 9477 | 1 / 200 | 0.5% |
+| `data/expert_dataset_cautious_heavy.pkl` | 40% normal, 50% cautious, 10% aggressive | 9316 | 9258 | 7 / 200 | 3.5% |
+| `data/expert_dataset_aggressive_heavy.pkl` | 40% normal, 10% cautious, 50% aggressive | 9517 | 9451 | 7 / 200 | 3.5% |
+
+The old high crash rates were traced to the collision reward sign bug above, not to the driver mixtures themselves. The old bugged datasets were deleted and the three fixed datasets above were regenerated.
 
 To regenerate:
 ```bash
-python3 src/generate_data.py --episodes 200   # full run
-python3 src/generate_data.py --episodes 5     # sanity check
+python3 src/generate_data.py --episodes 200 --mix all_normal
+python3 src/generate_data.py --episodes 200 --mix default_mix
+python3 src/generate_data.py --episodes 200 --mix cautious_heavy
+python3 src/generate_data.py --episodes 5 --all-mixes  # sanity check
 ```
 
 ---
@@ -116,10 +125,12 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 from policy_network import PolicyNetwork
 
-with open("expert_dataset.pkl", "rb") as f:
+with open("data/expert_dataset_default_mix.pkl", "rb") as f:
     dataset = pickle.load(f)
 
-obs_list, act_list = zip(*dataset)
+clean_dataset = [r for r in dataset if not r["crashed"]]
+obs_list = [r["obs"] for r in clean_dataset]
+act_list = [r["action"] for r in clean_dataset]
 obs_tensor = torch.tensor(np.array(obs_list), dtype=torch.float32)
 obs_tensor = obs_tensor.view(obs_tensor.size(0), -1)
 act_tensor = torch.tensor(np.array(act_list), dtype=torch.float32)
