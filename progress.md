@@ -59,6 +59,8 @@ Next step: train a policy network (`src/policy_network.py`) to imitate the MPC e
 
 2. **PPO warm-starting strategy:** For RL fine-tuning, should we freeze the BC encoder layers for the first few thousand steps, or let all layers train from the start with a low learning rate (1e-4)?
    
-3. How many episodes/merges do you suggest?
+3. How many episodes/merges do you suggest? we have 200 merges, and like 3000 steps/seconds worth of merging
 
 4. Question: Our MPC expert fixes steering to 0.0 — the ego is a highway vehicle that only needs to manage its speed, not change lanes. As a result, our BC network effectively only learns acceleration. Should we keep this as-is, or is there value in learning a steering signal too (e.g., for lane-keeping robustness in the PPO fine-tuning phase)?
+
+5. can we meet with u again pls
