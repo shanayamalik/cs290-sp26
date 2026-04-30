@@ -58,5 +58,3 @@ Next step: train a policy network (`src/policy_network.py`) to imitate the MPC e
 1. **Crash episode training signal:** We're excluding crashed episodes from BC training (26.5% of episodes, all spawn collisions within 4–8 steps). Is it worth keeping steps *before* the crash as additional signal, or is clean-only the safer approach?
 
 2. **PPO warm-starting strategy:** For RL fine-tuning, should we freeze the BC encoder layers for the first few thousand steps, or let all layers train from the start with a low learning rate (1e-4)?  
-
-3. **Evaluation scope:** Our three planned scenarios (Human-AV, Human-Mixed, Multi-AV) vary who the *other* vehicles are, but the ego's task is identical in all three — longitudinal gap management on the highway. Would you prefer we keep the three-scenario comparison, or focus on one scenario and vary driver type combinations more extensively?
