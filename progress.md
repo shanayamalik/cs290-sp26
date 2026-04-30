@@ -36,18 +36,18 @@ Bugs found and fixed during Phase 4 (documented in `mpc_expert_results.txt`):
 - Proximity feature sign bug: `−1/d²` with weight `−1.0` produced an attractive potential (rewarded closeness); fixed to `+1/d²`
 - Collision feature sign bug: `−1` with weight `−1000` produced `+1000` reward for predicted collisions; fixed to `+1`
 
-**Phase 5 — Expert dataset** (`src/generate_data.py`). Collected (obs, action) pairs from the MPC expert across 200 episodes (= 200 merge attempts) with named non-ego driver mixtures. The ego reward type is still randomized across cautious/normal/aggressive; the mixture controls only surrounding traffic.
+**Phase 5 — Expert dataset** (`src/generate_data.py`). Collected (obs, action) pairs from the MPC expert across 400 episodes (= 400 merge attempts) per named non-ego driver mixture. The ego reward type is still randomized across cautious/normal/aggressive; the mixture controls only surrounding traffic.
 
 Fixed-reward dataset results:
 
 | Dataset | Non-ego driver mix | Records | Clean records | Crashes | Crash rate |
 |---|---|---:|---:|---:|---:|
-| `data/expert_dataset_all_normal.pkl` | 100% normal | 9703 | 9695 | 1 / 200 | 0.5% |
-| `data/expert_dataset_default_mix.pkl` | 60% normal, 20% cautious, 20% aggressive | 9485 | 9477 | 1 / 200 | 0.5% |
-| `data/expert_dataset_cautious_heavy.pkl` | 40% normal, 50% cautious, 10% aggressive | 9316 | 9258 | 7 / 200 | 3.5% |
-| `data/expert_dataset_aggressive_heavy.pkl` | 40% normal, 10% cautious, 50% aggressive | 9517 | 9451 | 7 / 200 | 3.5% |
+| `data/expert_dataset_all_normal.pkl` | 100% normal | 18718 | 18616 | 10 / 400 | 2.5% |
+| `data/expert_dataset_default_mix.pkl` | 60% normal, 20% cautious, 20% aggressive | 18983 | 18913 | 8 / 400 | 2.0% |
+| `data/expert_dataset_cautious_heavy.pkl` | 40% normal, 50% cautious, 10% aggressive | 19003 | 18933 | 10 / 400 | 2.5% |
+| `data/expert_dataset_aggressive_heavy.pkl` | 40% normal, 10% cautious, 50% aggressive | 19060 | 18980 | 7 / 400 | 1.8% |
 
-> **On episode count:** Each episode is one merge attempt capped at 50 steps. After the collision reward fix, most episodes survive much longer, so 200 episodes now produces roughly 9k–10k transitions per mixture instead of the old ~3k bugged dataset. For behavioral cloning, train on clean records first (`crashed=False`) and keep the crash-flagged records for analysis/safety filtering.
+Total clean BC data: **75,442 transitions** across 1,600 merge attempts. For behavioral cloning, train on clean records first (`crashed=False`) and keep the crash-flagged records for analysis/safety filtering.
 
 ---
 
@@ -59,11 +59,11 @@ Next step: train a policy network (`src/policy_network.py`) to imitate the MPC e
 
 ## Questions for GSI
 
-1. **Crash episode training signal:** We're excluding crash-flagged records from BC training. After the reward fix, crash rates are much lower (0.5%, 0.5%, and 3.5% across the three fixed datasets). Is clean-only still the best training choice, or should we keep pre-crash steps from otherwise crashed episodes?
+1. **Crash episode training signal:** We're excluding crash-flagged records from BC training. After the reward fix, crash rates are much lower (1.8%-2.5% across the four fixed datasets). Is clean-only still the best training choice, or should we keep pre-crash steps from otherwise crashed episodes?
 
 2. **PPO warm-starting strategy:** For RL fine-tuning, should we freeze the BC encoder layers for the first few thousand steps, or let all layers train from the start with a low learning rate (1e-4)?
    
-3. How many episodes/merges do you suggest? We now have 200 merges per mixture and roughly 9k-10k transitions per fixed dataset.
+3. How many episodes/merges do you suggest? We now have 400 merges per mixture and roughly 18k-19k transitions per fixed dataset.
 
 4. Question: Our MPC expert fixes steering to 0.0 — the ego is a highway vehicle that only needs to manage its speed, not change lanes. As a result, our BC network effectively only learns acceleration. Should we keep this as-is, or is there value in learning a steering signal too (e.g., for lane-keeping robustness in the PPO fine-tuning phase)?
 

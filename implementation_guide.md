@@ -64,22 +64,23 @@ See `src/generate_data.py`. Committed to `naya` branch.
 - `ego_speed` and `d_min` saved per step for trajectory plots without decoding obs
 - `theta_name` saved as string for type-conditioned analysis
 
-**Fixed-reward results (200 episodes each, regenerated April 30):**
+**Fixed-reward results (400 episodes each, regenerated April 30):**
 
 | Dataset | Non-ego driver mix | Records | Clean records | Crashes | Crash rate |
 |---|---|---:|---:|---:|---:|
-| `data/expert_dataset_all_normal.pkl` | 100% normal | 9703 | 9695 | 1 / 200 | 0.5% |
-| `data/expert_dataset_default_mix.pkl` | 60% normal, 20% cautious, 20% aggressive | 9485 | 9477 | 1 / 200 | 0.5% |
-| `data/expert_dataset_cautious_heavy.pkl` | 40% normal, 50% cautious, 10% aggressive | 9316 | 9258 | 7 / 200 | 3.5% |
-| `data/expert_dataset_aggressive_heavy.pkl` | 40% normal, 10% cautious, 50% aggressive | 9517 | 9451 | 7 / 200 | 3.5% |
+| `data/expert_dataset_all_normal.pkl` | 100% normal | 18718 | 18616 | 10 / 400 | 2.5% |
+| `data/expert_dataset_default_mix.pkl` | 60% normal, 20% cautious, 20% aggressive | 18983 | 18913 | 8 / 400 | 2.0% |
+| `data/expert_dataset_cautious_heavy.pkl` | 40% normal, 50% cautious, 10% aggressive | 19003 | 18933 | 10 / 400 | 2.5% |
+| `data/expert_dataset_aggressive_heavy.pkl` | 40% normal, 10% cautious, 50% aggressive | 19060 | 18980 | 7 / 400 | 1.8% |
 
-The old high crash rates were traced to the collision reward sign bug above, not to the driver mixtures themselves. The old bugged datasets were deleted and the three fixed datasets above were regenerated.
+The old high crash rates were traced to the collision reward sign bug above, not to the driver mixtures themselves. The old bugged datasets were deleted and the four fixed datasets above were regenerated.
 
 To regenerate:
 ```bash
-python3 src/generate_data.py --episodes 200 --mix all_normal
-python3 src/generate_data.py --episodes 200 --mix default_mix
-python3 src/generate_data.py --episodes 200 --mix cautious_heavy
+python3 src/generate_data.py --episodes 400 --mix all_normal
+python3 src/generate_data.py --episodes 400 --mix default_mix
+python3 src/generate_data.py --episodes 400 --mix cautious_heavy
+python3 src/generate_data.py --episodes 400 --mix aggressive_heavy
 python3 src/generate_data.py --episodes 5 --all-mixes  # sanity check
 ```
 
