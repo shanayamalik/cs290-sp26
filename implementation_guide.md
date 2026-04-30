@@ -33,10 +33,21 @@ See [src/reward.py](src/reward.py). The reward is $r_i = \theta_i^\top f(s_t, u_
 
 ---
 
-## Phase 4: MPC Expert (Iterative Best-Response)
-**Goal:** Build an MPC that generates high-quality training trajectories by modeling interdependent driver reactions.
+## ✅ Phase 4: MPC Expert (Iterative Best-Response) — COMPLETE
 
-This is the most time-intensive phase. Prioritize it for the May 8 presentation — the MPC trajectories alone are sufficient preliminary results.
+See `src/best_response.py` and `src/mpc_expert.py`. Committed to `naya` branch (final commit `b38f98d`).
+
+**Key confirmed facts:**
+- Ego is the **highway vehicle** (y=4.0), not the merging one. NPC from ramp (y=14.5) merges in. Task = pure longitudinal gap management; `Y_TARGET=4.0`, steering fixed at 0.
+- `ACC_SCALE=5.0`, `DT_PLAN=1.0s`, `HORIZON=20`, `N_SAMPLES=50`, `N_WAYPOINTS=6`
+- Sampling: 3 structured candidates (constant-speed/brake/accel) + `normal(0, 0.4)` random waypoints
+- Verification pass: winning trajectory re-scored against responses re-predicted from that trajectory (~2ms extra)
+- `COLLISION_DIST=6.0m` (vehicles are ~5m long; 6m gives a small safety buffer)
+- `dt=DT_PLAN=1.0` passed explicitly to `ego_reward` (default was 0.1, inflating jerk 100×)
+- `proximity_penalty` feature = `+1/d²` (positive); negative weight makes contribution repulsive
+- Lane deviation weights zeroed (ego is not merging; `y = y_target = 4.0` always)
+
+**Full-episode result:** Ego stays at y=4.0, holds 15–29 m/s, traverses full a→b→c→d corridor without crash. ~12ms/call.
 
 ### Step 0: Switch to ContinuousAction — do this first
 
