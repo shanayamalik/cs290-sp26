@@ -55,10 +55,10 @@ Next step: train a policy network (`src/policy_network.py`) to imitate the MPC e
 
 ## Questions for GSI
 
-1. **Dataset size:** We collected 3169 clean transitions across 200 episodes (one episode = one merge). Is this sufficient for behavioral cloning, or would you recommend 500+ episodes? The main constraint is compute: each episode requires ~200 MPC calls at 12ms each (~2.4s/episode), so 500 episodes ≈ 20 minutes.
+1. **Dataset size:** We collected 3169 clean transitions across 200 episodes (one episode = one merge). Is this sufficient for behavioral cloning, or would you recommend 500+ episodes?  
 
-2. **Crash rate exclusion:** 26.5% of episodes ended in collision within the first 4–8 steps due to initial vehicle placement by the simulator (not MPC behavior). We plan to exclude all crashed episodes from the BC training set. Is it worth instead keeping the first N steps of crashed episodes (up to the crash) as additional training signal, or is clean-only the safer approach?
+2. **Crash rate exclusion:** 26.5% of 200 episodes ended in collision within the first 4–8 steps due to initial vehicle placement by the simulator (not MPC behavior). Should we plan to exclude all crashed episodes from the BC training set? Yes right? Is it worth instead keeping the first N steps of crashed episodes (up to the crash) as additional training signal, or is clean-only the safer approach?
 
-3. **BC architecture:** We're using a 4-layer MLP (25→256→256→128→2) with MSE loss. Any guidance on whether action normalization (tanh output layer) or a separate head per action dimension would be preferable for this continuous control setting?
+3. **BC architecture:** The network outputs 2 numbers (acceleration, steering), both constrained to [−1, 1]. Should we add a tanh activation on the output layer to enforce this range, or is clamping predictions at evaluation time sufficient? (Note: steering is always 0.0 in our MPC expert, so the network effectively only needs to learn acceleration.)
 
 4. **Phase 7 warm-starting:** For PPO fine-tuning, we plan to load BC weights as the policy initialization and freeze the encoder layers for the first few thousand steps. Does this match the approach you'd recommend, or should we let all layers train from the start?
