@@ -87,16 +87,31 @@ def mpc_select_action(env, theta: np.ndarray = NORMAL) -> np.ndarray:
     best_acc_norm = 0.0
     best_score = -np.inf
 
-    for _ in range(N_SAMPLES):
-        # Sample N_WAYPOINTS normalized acceleration values in [-1, 1],
-        # interpolate linearly to full HORIZON. Linear (not spline) to avoid
-        # overshoot outside [-1, 1].
-        waypoints = np.random.uniform(-1.0, 1.0, size=(N_WAYPOINTS,))
-        acc_sequence = np.interp(
-            np.arange(HORIZON),
-            np.linspace(0, HORIZON - 1, N_WAYPOINTS),
-            waypoints,
+    # Structured candidates: always evaluate these regardless of random sampling.
+    # Ensures the MPC has reasonable fallback options even when random sampling
+    # is sparse. (Claude review, 2026-04-29)
+    _xp = np.linspace(0, HORIZON - 1, N_WAYPOINTS)
+    _xi = np.arange(HORIZON)
+    structured = [
+        np.zeros(N_WAYPOINTS),          # constant speed
+        np.full(N_WAYPOINTS, -0.3),     # gentle braking
+        np.full(N_WAYPOINTS, 0.3),      # gentle acceleration
+    ]
+    for waypoints in structured:
+        acc_sequence = np.interp(_xi, _xp, waypoints)
+        score, first_acc_norm = _evaluate_sequence(
+            ego, acc_sequence, predicted_others, theta
         )
+        if score > best_score:
+            best_score = score
+            best_acc_norm = first_acc_norm
+
+    for _ in range(N_SAMPLES):
+        # Sample from a normal distribution centred at 0 (clipped to [-1, 1]).
+        # Most good highway driving involves small adjustments; uniform(-1,1)
+        # over-samples extreme actions that rarely win. (Claude review, 2026-04-29)
+        waypoints = np.random.normal(0.0, 0.4, size=(N_WAYPOINTS,)).clip(-1.0, 1.0)
+        acc_sequence = np.interp(_xi, _xp, waypoints)
         score, first_acc_norm = _evaluate_sequence(
             ego, acc_sequence, predicted_others, theta
         )
