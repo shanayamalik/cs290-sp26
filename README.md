@@ -43,3 +43,66 @@ Then run the environment sanity check (a render window with cars should appear, 
 ```bash
 python3 src/merge_env.py
 ```
+
+> **macOS note:** highway-env's render window requires a display. If you're on a headless machine, set `render_mode=None` in `merge_env.py` or run with `python3 -c "..."` style invocations.
+
+> **highway-env patch required:** The `merge-v0` env raises a `ValueError` when receiving a continuous action array. After installing dependencies, apply this one-line patch:
+> ```bash
+> python3 -c "
+> import highway_env, pathlib
+> f = pathlib.Path(highway_env.__file__).parent / 'envs/merge_env.py'
+> txt = f.read_text()
+> txt = txt.replace('action in [0, 2]', 'action in [0, 2] if isinstance(action, (int, float)) else False')
+> f.write_text(txt)
+> print('Patch applied.')
+> "
+> ```
+
+---
+
+## Reproducing Phase 4 results (MPC expert)
+
+After setup and the patch above, you can run the MPC expert on a single episode:
+
+```bash
+# From the project root with venv active
+python3 - <<'EOF'
+import sys; sys.path.insert(0, 'src')
+import gymnasium as gym, highway_env, numpy as np, random
+from driver_types import make_cautious, make_normal, make_aggressive
+from mpc_expert import mpc_select_action
+from reward import NORMAL
+
+env = gym.make('merge-v0', config={
+    'vehicles_count': 3,
+    'controlled_vehicles': 1,
+    'action': {'type': 'ContinuousAction'},
+})
+obs, _ = env.reset()
+for v in env.unwrapped.road.vehicles[1:]:
+    random.choice([make_cautious, make_normal, make_aggressive])(v)
+
+print(f"{'Step':>4}  {'y':>6}  {'vx':>6}  {'action[0]':>9}")
+for step in range(25):
+    action = mpc_select_action(env, theta=NORMAL)
+    obs, _, terminated, truncated, _ = env.step(action)
+    ego = env.unwrapped.road.vehicles[0]
+    print(f"{step:>4}  {ego.position[1]:>6.2f}  {ego.speed:>6.2f}  {action[0]:>9.4f}")
+    if terminated or truncated:
+        status = 'crash' if env.unwrapped.vehicle.crashed else 'completed'
+        print(f"\nEpisode {status} at step {step}.")
+        break
+
+env.close()
+EOF
+```
+
+**Expected output:** ego stays at y≈4.0 (main highway lane) throughout, speed holds 15–30 m/s, episode completes without crash. MPC call time is printed for the first 5 steps (~12 ms each).
+
+To run the best-response prediction tests:
+
+```bash
+python3 src/test_best_response.py
+# Saves plots to plots/test_single_follower.png and plots/test_chain_propagation.png
+```
+
