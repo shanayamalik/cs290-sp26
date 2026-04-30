@@ -27,6 +27,7 @@ env = gym.make("merge-v0", render_mode="human", config={
     "scaling": 7,
     "centering_position": [0.3, 0.5],
     "show_trajectories": True,
+    "action": {"type": "ContinuousAction"},
 })
 
 obs, info = env.reset()
@@ -41,7 +42,7 @@ for i, v in enumerate(env.unwrapped.road.vehicles):
     print(f"  [{i}] position={v.position}, speed={v.speed:.1f} m/s, lane={v.lane_index}")
 
 for step in range(200):
-    action = env.action_space.sample()
+    action = env.action_space.sample()  # ContinuousAction — will be a float array
     obs, reward, terminated, truncated, info = env.step(action)
     time.sleep(0.05)  # ~20fps — remove this line when generating training data
     if terminated or truncated:
