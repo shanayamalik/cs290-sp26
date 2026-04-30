@@ -87,10 +87,11 @@ def straight_line_trajectory(vehicle, horizon: int = HORIZON, dt: float = DT) ->
     return np.array(traj)
 
 
-def idm_acceleration(speed: float, target_speed: float, gap: float, time_wanted: float) -> float:
-    a_max = 3.0
-    delta = 4
-    s0 = 2.0
+def idm_acceleration(speed: float, target_speed: float, gap: float, time_wanted: float,
+                     a_max: float = 1.5, s0: float = 2.0, delta: int = 4) -> float:
+    # Default a_max=1.5 matches the normal driver archetype (Treiber 2000 reference values).
+    # idm_predict always passes vehicle.COMFORT_ACC_MAX explicitly, so the default
+    # only matters if idm_acceleration is called in isolation.
     s_star = s0 + max(0.0, speed * time_wanted)
     acc = a_max * (1 - (speed / max(target_speed, 0.1)) ** delta - (s_star / max(gap, 0.5)) ** 2)
     return float(np.clip(acc, -6.0, 4.0))
@@ -158,11 +159,16 @@ def predict_other_responses(env, ego_trajectory: np.ndarray, max_iter: int = MAX
 
 **Waypoint interpolation instead of per-step random sampling.** Sampling 50 random sequences over a 50-dimensional space produces mostly garbage trajectories. Instead, sample 6 acceleration *waypoints* and linearly interpolate to the full horizon — reduces the search space from 50-dim to 6-dim, which 50 samples can actually cover meaningfully.
 
+**Steering fixed at 0.** The merge task is a gap-acceptance timing problem, not a lateral positioning problem. Sampling both steering and acceleration doubles the search space with no benefit until longitudinal control is confirmed as the bottleneck. The MPC output is shape `(2,)` = `[0.0, acceleration_normalized]` to match the confirmed action space `Box(-1, 1, (2,), float32)`. Note: waypoint acceleration values are in raw m/s²; they must be normalized to `[-1, 1]` before being passed to `env.step()`.
+
 **Pre-compute other-vehicle responses once** using a nominal ego trajectory (constant current speed), then reuse across all N candidate sequences. This is the ~50x speedup noted above.
 
-**State dict helper:** `_extract_state` builds the dict expected by `ego_reward` from simulated positions — called thousands of times during MPC, so keep it lean.
+**State dict helper:** `_extract_state` builds the dict expected by `ego_reward` from simulated positions — `d_min` uses Euclidean distance (not just longitudinal), so two vehicles at the same x but different y do not produce a spuriously small gap.
+
+**Timing:** add a timing wrapper around the first few `mpc_select_action` calls. At 1 s/step × 200 steps/episode × 100 episodes = 5+ hours. If a single call exceeds ~0.5 s, reduce `N_SAMPLES` or `HORIZON` before starting data generation.
 
 ```python
+import time
 import numpy as np
 from reward import ego_reward, NORMAL
 from best_response import predict_other_responses, straight_line_trajectory, HORIZON, DT
@@ -170,11 +176,12 @@ from best_response import predict_other_responses, straight_line_trajectory, HOR
 N_SAMPLES = 50      # start with 10 while debugging; increase to 50–100 for data generation
 N_WAYPOINTS = 6     # number of acceleration waypoints to sample (interpolated to full horizon)
 COLLISION_DIST = 3.0  # meters; ego positions within this distance count as collision
+ACC_SCALE = 4.0     # maps raw m/s² to [-1, 1]: normalized = raw / ACC_SCALE
 
 
-def mpc_select_action(env, theta: np.ndarray = NORMAL) -> np.ndarray:
+def mpc_select_action(env, theta: np.ndarray = NORMAL, _time_calls: list = []) -> np.ndarray:
+    t0 = time.perf_counter()
     ego = env.unwrapped.road.vehicles[0]
-    prev_action = np.array([0.0])
 
     # Pre-compute other-vehicle responses once using nominal (constant-speed) ego trajectory
     nominal_ego_traj = straight_line_trajectory(ego)
@@ -184,27 +191,33 @@ def mpc_select_action(env, theta: np.ndarray = NORMAL) -> np.ndarray:
     # In merge-v0 the main lane is at y=0; adjust if needed based on env inspection
     y_target = 0.0
 
-    best_action = np.array([0.0])
+    best_acc = 0.0
     best_score = -np.inf
 
     for _ in range(N_SAMPLES):
-        # Sample waypoints, interpolate to full horizon
-        waypoints = np.random.uniform(-4.0, 3.0, size=(N_WAYPOINTS,))
+        # Sample acceleration waypoints in raw m/s², interpolate to full horizon
+        waypoints = np.random.uniform(-ACC_SCALE, ACC_SCALE * 0.75, size=(N_WAYPOINTS,))
         actions = np.interp(
             np.arange(HORIZON),
             np.linspace(0, HORIZON - 1, N_WAYPOINTS),
             waypoints,
         )
-        score, first_action = evaluate_sequence(ego, actions, predicted_others, theta, prev_action, y_target)
+        score, first_acc = evaluate_sequence(ego, actions, predicted_others, theta, y_target)
         if score > best_score:
             best_score = score
-            best_action = np.array([first_action])
+            best_acc = first_acc
 
-    return best_action
+    elapsed = time.perf_counter() - t0
+    _time_calls.append(elapsed)
+    if len(_time_calls) <= 5:
+        print(f"[MPC timing] call {len(_time_calls)}: {elapsed:.3f}s")
+
+    # Return (2,) float32 action: steering=0, acceleration normalized to [-1, 1]
+    return np.array([0.0, best_acc / ACC_SCALE], dtype=np.float32)
 
 
 def evaluate_sequence(ego, actions: np.ndarray, predicted_others: list,
-                      theta: np.ndarray, prev_action: np.ndarray, y_target: float):
+                      theta: np.ndarray, y_target: float):
     x, y, vx = ego.position[0], ego.position[1], ego.speed
     ego_traj = []
     for acc in actions:
@@ -214,7 +227,7 @@ def evaluate_sequence(ego, actions: np.ndarray, predicted_others: list,
     ego_traj = np.array(ego_traj)
 
     total_reward = 0.0
-    pa = prev_action.copy()
+    pa = np.array([0.0])
     for t, acc in enumerate(actions):
         state = _extract_state(ego_traj[t], predicted_others, t, y_target)
         total_reward += ego_reward(state, np.array([acc]), pa, theta)
