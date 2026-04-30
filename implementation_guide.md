@@ -51,56 +51,28 @@ See `src/best_response.py` and `src/mpc_expert.py`. Committed to `naya` branch (
 
 ---
 
-## Phase 5: Expert Dataset Generation
-**Goal:** Collect (observation, action) pairs from the MPC expert across diverse scenarios.
+## ✅ Phase 5: Expert Dataset Generation — COMPLETE
 
-### Generate and save the dataset
+See `src/generate_data.py`. Committed to `naya` branch.
 
-Create `generate_data.py`:
+**Key design decisions:**
+- Raw 5×5 obs saved (not flattened); flatten at training time with `obs.reshape(-1)`
+- Crashed episodes kept with `crashed=True` flag — filter at training time, exclude from BC
+- `MAX_STEPS=50` cap prevents runaway episodes (two 400+ step outliers observed without cap)
+- `ego_speed` and `d_min` saved per step for trajectory plots without decoding obs
+- `theta_name` saved as string for type-conditioned analysis
 
-```python
-import numpy as np
-import pickle
-import random
-import gymnasium as gym
-import highway_env  # noqa
+**Results (200 episodes):**
+- 3564 total transitions, 3169 clean (non-crashed)
+- 26.5% crash rate — dominated by spawn collisions (terminated within 4–8 steps); MPC had no time to react
+- Clean transitions per type: cautious 968, normal 1209, aggressive 992 (well-balanced, ≤1.25× ratio)
+- Saved to `data/expert_dataset.pkl` (excluded from git via `.gitignore`)
 
-from mpc_expert import mpc_select_action
-from driver_types import make_cautious, make_normal, make_aggressive
-from reward import CAUTIOUS, NORMAL, AGGRESSIVE
-
-N_EPISODES = 100  # reduce to 20 for a quick sanity check first
-driver_fns = [make_cautious, make_normal, make_aggressive]
-thetas = [CAUTIOUS, NORMAL, AGGRESSIVE]
-
-env = gym.make("merge-v0", config={"vehicles_count": 3, "controlled_vehicles": 1})
-dataset = []  # list of (observation, action) pairs
-
-for episode in range(N_EPISODES):
-    obs, info = env.reset()
-    ego_theta = random.choice(thetas)
-
-    for vehicle in env.road.vehicles[1:]:
-        random.choice(driver_fns)(vehicle)
-
-    terminated = truncated = False
-    while not (terminated or truncated):
-        action = mpc_select_action(env, theta=ego_theta)
-        dataset.append((obs.copy().flatten(), action.copy()))
-        obs, _, terminated, truncated, _ = env.step(action)
-
-    if (episode + 1) % 10 == 0:
-        print(f"Episode {episode + 1}/{N_EPISODES} — dataset size: {len(dataset)}")
-
-env.close()
-
-with open("expert_dataset.pkl", "wb") as f:
-    pickle.dump(dataset, f)
-
-print(f"Dataset saved: {len(dataset)} transitions")
+To regenerate:
+```bash
+python3 src/generate_data.py --episodes 200   # full run
+python3 src/generate_data.py --episodes 5     # sanity check
 ```
-
-**Done when:** `expert_dataset.pkl` exists and contains tens of thousands of (obs, action) pairs. Generate a few trajectory plots to use as preliminary results figures.
 
 ---
 

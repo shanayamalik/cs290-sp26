@@ -8,7 +8,7 @@ Extension of Sadigh et al. (2016) to multi-vehicle lane merging with 3+ agents. 
 
 Driver type parameters (in `src/driver_types.py`) are hand-tuned based on empirically observed ranges from Treiber et al. (2000) and map onto the Social Value Orientation taxonomy from Schwarting et al. (2019). They are not learned from data.
 
-**Progress:** Phases 1–4 complete (environment setup, driver types, reward functions, MPC expert). Starting Phase 5 (expert dataset generation).
+**Progress:** Phases 1–5 complete (environment setup, driver types, reward functions, MPC expert, expert dataset generation). Starting Phase 6 (behavioral cloning).
 See [implementation_guide.md](implementation_guide.md) for the full step-by-step implementation plan.
 See [report_notes.md](report_notes.md) for things to address in the final paper writeup.
 
@@ -62,42 +62,25 @@ python3 src/merge_env.py
 
 ## Reproducing Phase 4 results (MPC expert)
 
-After setup and the patch above, you can run the MPC expert on a single episode:
+After setup and the patch above, run a single MPC expert episode:
 
 ```bash
-# From the project root with venv active
-python3 - <<'EOF'
-import sys; sys.path.insert(0, 'src')
-import gymnasium as gym, highway_env, numpy as np, random
-from driver_types import make_cautious, make_normal, make_aggressive
-from mpc_expert import mpc_select_action
-from reward import NORMAL
-
-env = gym.make('merge-v0', config={
-    'vehicles_count': 3,
-    'controlled_vehicles': 1,
-    'action': {'type': 'ContinuousAction'},
-})
-obs, _ = env.reset()
-for v in env.unwrapped.road.vehicles[1:]:
-    random.choice([make_cautious, make_normal, make_aggressive])(v)
-
-print(f"{'Step':>4}  {'y':>6}  {'vx':>6}  {'action[0]':>9}")
-for step in range(25):
-    action = mpc_select_action(env, theta=NORMAL)
-    obs, _, terminated, truncated, _ = env.step(action)
-    ego = env.unwrapped.road.vehicles[0]
-    print(f"{step:>4}  {ego.position[1]:>6.2f}  {ego.speed:>6.2f}  {action[0]:>9.4f}")
-    if terminated or truncated:
-        status = 'crash' if env.unwrapped.vehicle.crashed else 'completed'
-        print(f"\nEpisode {status} at step {step}.")
-        break
-
-env.close()
-EOF
+python3 src/run_mpc_episode.py
 ```
 
 **Expected output:** ego stays at y≈4.0 (main highway lane) throughout, speed holds 15–30 m/s, episode completes without crash. MPC call time is printed for the first 5 steps (~12 ms each).
+
+## Reproducing Phase 5 results (expert dataset generation)
+
+```bash
+# Quick sanity check (5 episodes)
+python3 src/generate_data.py --episodes 5
+
+# Full dataset (200 episodes, ~3 min)
+python3 src/generate_data.py --episodes 200
+```
+
+Output saved to `data/expert_dataset.pkl` (excluded from git). Summary: 3564 total transitions, 3169 clean (non-crashed), ~1000 per driver type.
 
 To run the best-response prediction tests:
 
