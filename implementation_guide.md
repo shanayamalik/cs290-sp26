@@ -21,42 +21,15 @@ Driver types are randomly assigned to non-ego vehicles in `merge_env.py` via `as
 
 ---
 
-## Phase 3: Reward Functions
-**Goal:** Implement a feature-based reward function that supports all three driver types.
+## ✅ Phase 3: Reward Functions — COMPLETE
 
-### Implement reward features
+See [src/reward.py](src/reward.py). The reward is $r_i = \theta_i^\top f(s_t, u_t)$ with six features. The three numbers are for cautious/normal/aggressive. Key design decisions:
 
-Create `reward.py`. The reward for agent $i$ is $r_i = \theta_i^\top f(s_t, u_t)$, where $f$ has six components:
-
-```python
-import numpy as np
-
-# Weight vectors: [forward_progress, proximity_penalty, smoothness, jerk, collision, lane_deviation]
-CAUTIOUS   = np.array([0.2, -2.0, -0.5, -0.3, -1000.0, -0.5])
-NORMAL     = np.array([0.5, -1.0, -0.3, -0.2, -1000.0, -0.3])
-AGGRESSIVE = np.array([0.9, -0.3, -0.1, -0.1, -1000.0, -0.1])
-
-
-def compute_features(state: dict, action: np.ndarray, prev_action: np.ndarray, dt: float = 0.1) -> np.ndarray:
-    """
-    state keys expected: vx, d_min, y, y_target
-    action: [acceleration]
-    """
-    v_desired = 30.0  # m/s
-    forward_progress = state["vx"] / v_desired
-    proximity_penalty = -1.0 / max(state["d_min"] ** 2, 0.1)
-    smoothness = -(action[0] ** 2)
-    jerk = -((action[0] - prev_action[0]) / dt) ** 2
-    collision = -1.0 if state.get("collision", False) else 0.0
-    lane_deviation = -((state["y"] - state["y_target"]) ** 2)
-
-    return np.array([forward_progress, proximity_penalty, smoothness, jerk, collision, lane_deviation])
-
-
-def ego_reward(state: dict, action: np.ndarray, prev_action: np.ndarray, theta: np.ndarray, dt: float = 0.1) -> float:
-    f = compute_features(state, action, prev_action, dt)
-    return float(theta @ f)
-```
+- **forward_progress (0.2/0.5/0.9):** normalized feature in [0,1]; ordering encodes SVO angle φ (Schwarting et al. 2019)
+- **proximity_penalty (−2.0/−1.0/−0.5):** 1/d² repulsive potential (Khatib 1986), 4:2:1 ratio across types
+- **smoothness/jerk:** secondary comfort terms (Bae et al. 2020), intentionally small — tune after MPC works
+- **collision (−1000, all types):** dominates any horizon (50 steps × max 0.9 = 45 << 1000); no per-step gain justifies a crash
+- **lane_deviation (−0.5/−0.3/−0.1):** y_target must be the *target* lane center, not current lane
 
 ---
 

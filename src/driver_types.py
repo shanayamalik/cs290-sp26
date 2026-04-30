@@ -34,8 +34,8 @@ def make_cautious(vehicle: IDMVehicle) -> None:
 
     Corresponds to a prosocial SVO (Schwarting et al., phi ~ pi/4).
     """
-    vehicle.COMFORT_ACC_MAX = 1.5   # m/s^2 — gentle acceleration
-    vehicle.COMFORT_ACC_MIN = -2.0  # m/s^2 — moderate braking
+    vehicle.COMFORT_ACC_MAX = 1.2   # m/s^2 — gentler than normal (1.5) to distinguish free-road behavior
+    vehicle.COMFORT_ACC_MIN = -1.5  # m/s^2 — softer braking than normal (-2.0)
     vehicle.TIME_WANTED = 2.5       # s — large desired time headway
     vehicle.DISTANCE_WANTED = 8.0   # m — large minimum gap
     vehicle.DELTA = 4               # IDM velocity exponent (standard value)
@@ -72,5 +72,5 @@ def make_aggressive(vehicle: IDMVehicle) -> None:
     vehicle.COMFORT_ACC_MAX = 2.5   # m/s^2 — strong acceleration
     vehicle.COMFORT_ACC_MIN = -4.0  # m/s^2 — hard braking capability
     vehicle.TIME_WANTED = 1.0       # s — short headway; keep >= 1.0 for stability
-    vehicle.DISTANCE_WANTED = 1.0   # m — tight minimum gap
+    vehicle.DISTANCE_WANTED = 1.5   # m — tight gap; raised from 1.0 (< car width) to avoid cascading MPC collisions
     vehicle.DELTA = 4
