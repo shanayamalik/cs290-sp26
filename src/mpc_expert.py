@@ -55,7 +55,6 @@ FALLBACK_BRAKING = np.array([-0.5, 0.0], dtype=np.float32)
 
 _timing_calls: list = []  # accumulates wall-clock times for first 5 calls
 
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
