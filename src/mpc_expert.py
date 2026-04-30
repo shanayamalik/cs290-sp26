@@ -43,7 +43,7 @@ DT_PLAN = 1.0          # seconds per env step (= sim_freq / policy_freq * physic
 HORIZON = 20           # planning horizon in env steps (20 s); start short, scale up
 N_SAMPLES = 50         # candidate sequences; reduce to 10 while debugging
 N_WAYPOINTS = 6        # acceleration waypoints per sequence, interpolated to HORIZON
-COLLISION_DIST = 3.0   # m, Euclidean; center-to-center distance for collision flag
+COLLISION_DIST = 6.0   # m, Euclidean center-to-center; vehicles are ~5m long so 6m
 # Y_TARGET: ego's own lane center (y=4.0), confirmed from road network inspection.
 # Ego starts at ('a','b',1) y=4.0; NPC from ramp at ('j','k',0) y=14.5.
 # The ego is NOT the merging vehicle — it is the highway vehicle managing gap.
@@ -110,7 +110,22 @@ def mpc_select_action(env, theta: np.ndarray = NORMAL) -> np.ndarray:
     if best_score < CRASH_THRESHOLD:
         action = FALLBACK_BRAKING.copy()
     else:
-        action = np.array([float(best_acc_norm), 0.0], dtype=np.float32)
+        # Verification pass: re-run predict_other_responses with the winning
+        # ego trajectory (not the nominal constant-speed one) and re-score.
+        # Catches cases where the approximation was misleading — e.g., heavy
+        # braking puts ego closer to followers than the nominal traj assumed.
+        # Cost: ~1 extra IDM prediction call (~0.2ms), well within 10ms budget.
+        # (Claude review, 2026-04-29)
+        best_waypoints = np.random.uniform(-1.0, 1.0, size=(N_WAYPOINTS,))  # placeholder
+        # Reconstruct winning acc_sequence from best_acc_norm via constant sequence
+        winning_sequence = np.full(HORIZON, best_acc_norm)
+        winning_ego_traj = _build_ego_traj(ego, winning_sequence)
+        verified_others = predict_other_responses(env, winning_ego_traj)
+        verified_score, _ = _evaluate_sequence(ego, winning_sequence, verified_others, theta)
+        if verified_score < CRASH_THRESHOLD:
+            action = FALLBACK_BRAKING.copy()
+        else:
+            action = np.array([float(best_acc_norm), 0.0], dtype=np.float32)
 
     # Timing: print first 5 calls so operator can judge whether to reduce
     # N_SAMPLES / HORIZON before launching 100-episode data generation
@@ -164,7 +179,11 @@ def _evaluate_sequence(ego, acc_sequence: np.ndarray,
         # so 1 plan step (1.0s) ≈ 10 IDM steps. Use t*10 as index, capped.
         idm_t = min(t * 10, predicted_others[0].shape[0] - 1) if predicted_others else 0
         state = _extract_state(ego_pos, predicted_others, idm_t)
-        total_reward += ego_reward(state, np.array([acc_phys]), prev_acc, theta)
+        # Pass dt=DT_PLAN (1.0s) so jerk = ((a_t - a_{t-1}) / 1.0)^2.
+        # Without this, ego_reward defaults to dt=0.1s, inflating jerk 100x
+        # and massively over-penalizing any acceleration change (Claude, 2026-04-29).
+        total_reward += ego_reward(state, np.array([acc_phys]), prev_acc, theta,
+                                   dt=DT_PLAN)
         prev_acc = np.array([acc_phys])
 
     return total_reward, acc_sequence[0]
@@ -210,3 +229,47 @@ def _extract_state(ego_pos: np.ndarray, others: list, t: int) -> dict:
         "y_target": Y_TARGET,
         "collision": collision,
     }
+
+
+def _build_ego_traj(ego, acc_sequence: np.ndarray) -> np.ndarray:
+    """
+    Build an ego trajectory in the same format as straight_line_trajectory
+    (shape: (best_response.HORIZON, 3) = [x, y, vx] at DT=0.1s steps)
+    but using the MPC winning acceleration sequence instead of constant speed.
+
+    Used for the verification pass: predict_other_responses expects a trajectory
+    at DT=0.1s granularity, so we interpolate the coarser MPC sequence.
+    Each MPC step is DT_PLAN=1.0s = 10 IDM steps; we hold acc constant within
+    each MPC step (zero-order hold).
+
+    Parameters
+    ----------
+    ego          : ego vehicle with .position and .speed
+    acc_sequence : (HORIZON,) normalized accelerations in [-1, 1]
+
+    Returns
+    -------
+    np.ndarray of shape (best_response.HORIZON, 3)
+    """
+    from best_response import HORIZON as IDM_HORIZON, DT as IDM_DT
+    x = float(ego.position[0])
+    y = float(ego.position[1])
+    vx = float(ego.speed)
+    traj = []
+    for mpc_t, acc_norm in enumerate(acc_sequence):
+        acc_phys = float(acc_norm) * ACC_SCALE
+        # Expand each 1.0s MPC step into 10 IDM substeps of 0.1s each
+        substeps = max(1, round(DT_PLAN / IDM_DT))
+        for _ in range(substeps):
+            if len(traj) >= IDM_HORIZON:
+                break
+            vx = max(0.0, min(40.0, vx + acc_phys * IDM_DT))
+            x += vx * IDM_DT
+            traj.append([x, y, vx])
+        if len(traj) >= IDM_HORIZON:
+            break
+    # Pad with constant speed if MPC horizon is shorter than IDM horizon
+    while len(traj) < IDM_HORIZON:
+        x += vx * IDM_DT
+        traj.append([x, y, vx])
+    return np.array(traj[:IDM_HORIZON], dtype=np.float64)

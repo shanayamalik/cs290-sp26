@@ -53,9 +53,13 @@ import numpy as np
 
 # fmt: off
 #                [fwd_prog, proximity, smooth,  jerk,   collision, lane_dev]
-CAUTIOUS   = np.array([0.2,  -2.0,    -0.5,   -0.3,   -1000.0,   -0.5])
-NORMAL     = np.array([0.5,  -1.0,    -0.3,   -0.2,   -1000.0,   -0.3])
-AGGRESSIVE = np.array([0.9,  -0.5,    -0.1,   -0.1,   -1000.0,   -0.1])
+# lane_deviation weight is 0.0 for all types: ego is the highway vehicle
+# (not merging), so y = y_target = 4.0 always. The feature is identically
+# zero and the weight does nothing. Zeroed explicitly rather than removed
+# so the weight vector length stays consistent. (Claude review, 2026-04-29)
+CAUTIOUS   = np.array([0.2,  -2.0,    -0.5,   -0.3,   -1000.0,    0.0])
+NORMAL     = np.array([0.5,  -1.0,    -0.3,   -0.2,   -1000.0,    0.0])
+AGGRESSIVE = np.array([0.9,  -0.5,    -0.1,   -0.1,   -1000.0,    0.0])
 # fmt: on
 
 THETA = {
