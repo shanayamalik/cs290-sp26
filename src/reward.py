@@ -26,10 +26,10 @@ import numpy as np
 #   self-weight, egoistic -> higher. Only positive weights; set the scale.
 #
 # proximity_penalty (-2.0 / -1.0 / -0.5)
-#   Feature = -1/max(d_min^2, 0.1). Repulsive potential growing as 1/d^2
-#   (Khatib 1986 IJRR). 4:2:1 ratio -> cautious feels 4x proximity cost of
-#   aggressive at any gap. Aggressive raised from -0.3 to -0.5 to prevent
-#   tailgating from collapsing all behavior into the collision-penalty regime.
+#   Feature = +1/max(d_min^2, 0.1). Repulsive potential growing as 1/d^2
+#   (Khatib 1986 IJRR). Negative weight × positive feature = negative penalty
+#   that grows as vehicles get closer. 4:2:1 ratio -> cautious feels 4x
+#   proximity cost of aggressive at any gap.
 #
 # smoothness (-0.5 / -0.3 / -0.1)
 #   Feature = -a^2. Comfort objective, Bae et al. (2020) Eq. 4. Secondary
@@ -53,9 +53,13 @@ import numpy as np
 
 # fmt: off
 #                [fwd_prog, proximity, smooth,  jerk,   collision, lane_dev]
-CAUTIOUS   = np.array([0.2,  -2.0,    -0.5,   -0.3,   -1000.0,   -0.5])
-NORMAL     = np.array([0.5,  -1.0,    -0.3,   -0.2,   -1000.0,   -0.3])
-AGGRESSIVE = np.array([0.9,  -0.5,    -0.1,   -0.1,   -1000.0,   -0.1])
+# lane_deviation weight is 0.0 for all types: ego is the highway vehicle
+# (not merging), so y = y_target = 4.0 always. The feature is identically
+# zero and the weight does nothing. Zeroed explicitly rather than removed
+# so the weight vector length stays consistent. (Claude review, 2026-04-29)
+CAUTIOUS   = np.array([0.2,  -2.0,    -0.5,   -0.3,   -1000.0,    0.0])
+NORMAL     = np.array([0.5,  -1.0,    -0.3,   -0.2,   -1000.0,    0.0])
+AGGRESSIVE = np.array([0.9,  -0.5,    -0.1,   -0.1,   -1000.0,    0.0])
 # fmt: on
 
 THETA = {
@@ -94,7 +98,11 @@ def compute_features(
     v_desired = 30.0  # m/s -- highway target speed
 
     forward_progress = state["vx"] / v_desired
-    proximity_penalty = -1.0 / max(state["d_min"] ** 2, 0.1)
+    # Feature is positive (1/d²); the negative weight makes the contribution
+    # negative (penalizes closeness). Previously had a leading minus here,
+    # which combined with the negative weight to produce a positive (attractive)
+    # result — rewarding closeness instead of penalizing it. (2026-04-29)
+    proximity_penalty = 1.0 / max(state["d_min"] ** 2, 0.1)
     smoothness = -(action[0] ** 2)
     jerk = -((action[0] - prev_action[0]) / dt) ** 2
     collision = -1.0 if state.get("collision", False) else 0.0

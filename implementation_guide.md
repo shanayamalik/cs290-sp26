@@ -33,156 +33,21 @@ See [src/reward.py](src/reward.py). The reward is $r_i = \theta_i^\top f(s_t, u_
 
 ---
 
-## Phase 4: MPC Expert (Iterative Best-Response)
-**Goal:** Build an MPC that generates high-quality training trajectories by modeling interdependent driver reactions.
+## ✅ Phase 4: MPC Expert (Iterative Best-Response) — COMPLETE
 
-This is the most time-intensive phase. Prioritize it for the May 8 presentation — the MPC trajectories alone are sufficient preliminary results.
+See `src/best_response.py` and `src/mpc_expert.py`. Committed to `naya` branch (final commit `b38f98d`).
 
-### Iterative best-response prediction
+**Key confirmed facts:**
+- Ego is the **highway vehicle** (y=4.0), not the merging one. NPC from ramp (y=14.5) merges in. Task = pure longitudinal gap management; `Y_TARGET=4.0`, steering fixed at 0.
+- `ACC_SCALE=5.0`, `DT_PLAN=1.0s`, `HORIZON=20`, `N_SAMPLES=50`, `N_WAYPOINTS=6`
+- Sampling: 3 structured candidates (constant-speed/brake/accel) + `normal(0, 0.4)` random waypoints
+- Verification pass: winning trajectory re-scored against responses re-predicted from that trajectory (~2ms extra)
+- `COLLISION_DIST=6.0m` (vehicles are ~5m long; 6m gives a small safety buffer)
+- `dt=DT_PLAN=1.0` passed explicitly to `ego_reward` (default was 0.1, inflating jerk 100×)
+- `proximity_penalty` feature = `+1/d²` (positive); negative weight makes contribution repulsive
+- Lane deviation weights zeroed (ego is not merging; `y = y_target = 4.0` always)
 
-Create `best_response.py`. The algorithm:
-
-1. Initialize all non-ego trajectories as constant-speed, straight-line.
-2. For each iteration (K = 3–5): update each driver's predicted trajectory given the others' current predictions.
-3. If $\|\tau^{(k)} - \tau^{(k-1)}\| < \epsilon$, stop early.
-4. **Fallback:** if convergence is not reached, use the last iterate. Non-convergence is expected with aggressive drivers — document it.
-
-```python
-import numpy as np
-
-DT = 0.1
-HORIZON = 50  # 5 seconds at 0.1s per step
-MAX_ITER = 4
-EPSILON = 1e-3
-
-
-def straight_line_trajectory(vehicle, horizon: int = HORIZON, dt: float = DT) -> np.ndarray:
-    """Constant-speed, straight-line prediction."""
-    traj = []
-    x, y, vx = vehicle.position[0], vehicle.position[1], vehicle.speed
-    for _ in range(horizon):
-        x += vx * dt
-        traj.append([x, y, vx])
-    return np.array(traj)
-
-
-def idm_acceleration(speed: float, target_speed: float, gap: float, time_wanted: float) -> float:
-    a_max = 3.0
-    a_comfort = 5.0
-    delta = 4
-    s0 = 2.0
-    s_star = s0 + max(0, speed * time_wanted)
-    acc = a_max * (1 - (speed / max(target_speed, 0.1)) ** delta - (s_star / max(gap, 0.5)) ** 2)
-    return float(np.clip(acc, -6.0, 4.0))
-
-
-def predict_other_responses(env, ego_trajectory: np.ndarray, max_iter: int = MAX_ITER) -> list[np.ndarray]:
-    """
-    Given a planned ego trajectory, iteratively predict non-ego vehicle trajectories.
-    Returns a list of predicted trajectories (one per non-ego vehicle).
-    """
-    non_ego = env.road.vehicles[1:]
-    predicted = [straight_line_trajectory(v) for v in non_ego]
-
-    for _ in range(max_iter):
-        prev = [p.copy() for p in predicted]
-        for i, vehicle in enumerate(non_ego):
-            predicted[i] = idm_predict(vehicle, ego_trajectory, predicted, i)
-        if all(np.linalg.norm(predicted[i] - prev[i]) < EPSILON for i in range(len(non_ego))):
-            break  # converged
-
-    return predicted  # use last iterate regardless
-
-
-def idm_predict(vehicle, ego_trajectory: np.ndarray, all_predicted: list[np.ndarray], own_idx: int) -> np.ndarray:
-    traj = []
-    x, y, vx = vehicle.position[0], vehicle.position[1], vehicle.speed
-    time_wanted = getattr(vehicle, "TIME_WANTED", 1.5)
-    target_speed = getattr(vehicle, "target_speed", 30.0)
-
-    for t in range(HORIZON):
-        # Find the nearest vehicle ahead (ego + other predicted)
-        ego_x = ego_trajectory[t, 0] if t < len(ego_trajectory) else ego_trajectory[-1, 0]
-        gaps = [ego_x - x]
-        for j, other_traj in enumerate(all_predicted):
-            if j == own_idx:
-                continue
-            other_x = other_traj[t, 0] if t < len(other_traj) else other_traj[-1, 0]
-            if other_x > x:
-                gaps.append(other_x - x)
-        gap = max(min(gaps) - 4.5, 0.5)  # 4.5m vehicle length
-
-        acc = idm_acceleration(vx, target_speed, gap, time_wanted)
-        vx = max(0.0, vx + acc * DT)
-        x += vx * DT
-        traj.append([x, y, vx])
-
-    return np.array(traj)
-```
-
-### MPC action selection
-
-Create `mpc_expert.py`. For each timestep, sample N action sequences over the planning horizon, simulate ego dynamics, score using `ego_reward`, return the best first action.
-
-```python
-import numpy as np
-from reward import ego_reward, NORMAL
-from best_response import predict_other_responses, HORIZON, DT
-
-N_SAMPLES = 50  # increase to 100+ for better expert quality
-
-
-def mpc_select_action(env, theta: np.ndarray = NORMAL) -> np.ndarray:
-    best_action = np.array([0.0])
-    best_score = -np.inf
-
-    ego = env.road.vehicles[0]
-    prev_action = np.array([0.0])
-
-    for _ in range(N_SAMPLES):
-        actions = np.random.uniform(-4.0, 3.0, size=(HORIZON,))
-        score, first_action = evaluate_sequence(env, actions, theta, prev_action)
-        if score > best_score:
-            best_score = score
-            best_action = np.array([first_action])
-
-    return best_action
-
-
-def evaluate_sequence(env, actions: np.ndarray, theta: np.ndarray, prev_action: np.ndarray) -> tuple[float, float]:
-    ego = env.road.vehicles[0]
-    x, y, vx = ego.position[0], ego.position[1], ego.speed
-    y_target = y  # simplification: stay in current lane
-
-    ego_traj = []
-    for acc in actions:
-        vx = max(0.0, vx + acc * DT)
-        x += vx * DT
-        ego_traj.append([x, y, vx])
-    ego_traj = np.array(ego_traj)
-
-    predicted_others = predict_other_responses(env, ego_traj)
-
-    total_reward = 0.0
-    pa = prev_action.copy()
-    for t, acc in enumerate(actions):
-        d_min = _min_distance(ego_traj[t], predicted_others, t)
-        state = {"vx": ego_traj[t, 2], "d_min": d_min, "y": y_target, "y_target": y_target}
-        total_reward += ego_reward(state, np.array([acc]), pa, theta)
-        pa = np.array([acc])
-
-    return total_reward, actions[0]
-
-
-def _min_distance(ego_pos: np.ndarray, others: list[np.ndarray], t: int) -> float:
-    distances = []
-    for traj in others:
-        other_pos = traj[t] if t < len(traj) else traj[-1]
-        distances.append(np.linalg.norm(ego_pos[:2] - other_pos[:2]))
-    return min(distances) if distances else 100.0
-```
-
-**Done when:** You can call `mpc_select_action(env)` at each timestep and the ego vehicle navigates the merge without crashing across multiple episodes.
+**Full-episode result:** Ego stays at y=4.0, holds 15–29 m/s, traverses full a→b→c→d corridor without crash. ~12ms/call.
 
 ---
 
