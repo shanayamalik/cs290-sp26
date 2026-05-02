@@ -86,78 +86,37 @@ python3 src/generate_data.py --episodes 5 --all-mixes  # sanity check
 
 ---
 
-## Phase 6: Behavioral Cloning (Policy Distillation)
-**Goal:** Train a neural network to imitate the MPC expert via supervised learning.
+## ✅ Phase 6: Behavioral Cloning — COMPLETE
 
-### Define the policy network
+See `src/policy_network.py`, `src/train_policy.py`, `src/eval_policy.py`. Committed to `naya` branch.
 
-Create `policy_network.py`:
+**Obs augmentation:** Raw 5×5 obs (25 features) augmented with `d_min` (nearest vehicle gap) and `step` (episode progress) → 27-dim input. Normalized per-feature using training-split mean/std only (no data leakage). Stats saved to `models/bc_policy_{dataset}.npz` alongside weights.
 
-```python
-import torch
-import torch.nn as nn
+**Architecture:** MLP 27→256→256→128→2, tanh output (enforces [−1,1]). 106,114 params.
 
-class PolicyNetwork(nn.Module):
-    def __init__(self, obs_dim: int, action_dim: int):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(obs_dim, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, 128),
-            nn.ReLU(),
-            nn.Linear(128, action_dim),
-        )
+**Training:** 100 epochs, batch=256, lr=1e-3, ReduceLROnPlateau (patience=10, factor=0.5), MSE loss, 90/10 split. Mean-prediction baseline loss: 0.287 (BC achieves 0.112, ~61% reduction).
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)
+**Ablation results (20-episode rollout each, seed=0, MAX_STEPS=50):**
+
+| Dataset | Records | Best val loss | Crash rate | Mean steps |
+|---|---:|---:|---:|---:|
+| all_normal | 18,616 | 0.11195 | 35% | 33.2 |
+| default_mix | 18,913 | 0.11245 | 20% | 40.4 |
+| cautious_heavy | 18,933 | 0.11508 | 25% | 38.1 |
+| aggressive_heavy | 18,980 | 0.11825 | 40% | 30.8 |
+| **all (combined)** | **75,442** | **0.11194** | **10%** | **45.2** |
+
+All rollout crashes are at step 2 (spawn collisions). BC policy causes 0 self-crashes. Episodes hitting MAX_STEPS=50 show BC learned safe behavior but not goal-directed driving — classic distribution shift addressed by PPO.
+
+**PPO warm-start model:** `models/bc_policy_all.pt` + `models/bc_policy_all.npz`
+
+To reproduce:
+```bash
+python3 src/train_policy.py --dataset all         # combined (PPO warm-start)
+python3 src/train_policy.py --dataset all_normal  # ablation
+# ... repeat for default_mix, cautious_heavy, aggressive_heavy
+python3 src/eval_policy.py --model models/bc_policy_all.pt --episodes 20 --no-mpc-baseline
 ```
-
-### Train via behavioral cloning
-
-Create `train_policy.py`:
-
-```python
-import pickle
-import numpy as np
-import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
-from policy_network import PolicyNetwork
-
-with open("data/expert_dataset_default_mix.pkl", "rb") as f:
-    dataset = pickle.load(f)
-
-clean_dataset = [r for r in dataset if not r["crashed"]]
-obs_list = [r["obs"] for r in clean_dataset]
-act_list = [r["action"] for r in clean_dataset]
-obs_tensor = torch.tensor(np.array(obs_list), dtype=torch.float32)
-obs_tensor = obs_tensor.view(obs_tensor.size(0), -1)
-act_tensor = torch.tensor(np.array(act_list), dtype=torch.float32)
-if act_tensor.dim() == 1:
-    act_tensor = act_tensor.unsqueeze(1)
-
-obs_dim, action_dim = obs_tensor.shape[1], act_tensor.shape[1]
-model = PolicyNetwork(obs_dim, action_dim)
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-loss_fn = nn.MSELoss()
-loader = DataLoader(TensorDataset(obs_tensor, act_tensor), batch_size=64, shuffle=True)
-
-EPOCHS = 50
-for epoch in range(EPOCHS):
-    total_loss = 0.0
-    for obs_batch, act_batch in loader:
-        pred = model(obs_batch)
-        loss = loss_fn(pred, act_batch)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        total_loss += loss.item()
-    if (epoch + 1) % 10 == 0:
-        print(f"Epoch {epoch+1}/{EPOCHS} — loss: {total_loss/len(loader):.4f}")
-
-torch.save(model.state_dict(), "distilled_policy.pt")
 print("Saved distilled_policy.pt")
 ```
 

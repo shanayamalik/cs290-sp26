@@ -1,1 +1,6 @@
 data/
+venv/
+models/*.pt
+plots/
+__pycache__/
+*.pyc

@@ -8,7 +8,7 @@ Extension of Sadigh et al. (2016) to multi-vehicle lane merging with 3+ agents. 
 
 Driver type parameters (in `src/driver_types.py`) are hand-tuned based on empirically observed ranges from Treiber et al. (2000) and map onto the Social Value Orientation taxonomy from Schwarting et al. (2019). They are not learned from data.
 
-**Progress:** Phases 1–5 complete (environment setup, driver types, reward functions, MPC expert, expert dataset generation). Starting Phase 6 (behavioral cloning).
+**Progress:** Phases 1–6 complete (environment setup, driver types, reward functions, MPC expert, expert dataset generation, behavioral cloning). Starting Phase 7 (PPO fine-tuning).
 See [implementation_guide.md](implementation_guide.md) for the full step-by-step implementation plan.
 See [report_notes.md](report_notes.md) for things to address in the final paper writeup.
 
@@ -88,4 +88,32 @@ To run the best-response prediction tests:
 python3 src/test_best_response.py
 # Saves plots to plots/test_single_follower.png and plots/test_chain_propagation.png
 ```
+
+## Reproducing Phase 6 results (behavioral cloning)
+
+```bash
+# Train on each driver mix (ablation)
+python3 src/train_policy.py --dataset all_normal
+python3 src/train_policy.py --dataset default_mix
+python3 src/train_policy.py --dataset cautious_heavy
+python3 src/train_policy.py --dataset aggressive_heavy
+
+# Train on all four combined (PPO warm-start)
+python3 src/train_policy.py --dataset all
+
+# Evaluate a model (20 rollout episodes)
+python3 src/eval_policy.py --model models/bc_policy_all.pt --episodes 20 --no-mpc-baseline
+```
+
+Outputs: `models/bc_policy_{dataset}.pt` (weights) and `models/bc_policy_{dataset}.npz` (normalization stats). Both files are required at rollout time — `eval_policy.py` will error if the `.npz` is missing.
+
+**Phase 6 ablation summary (20-episode rollout, seed=0):**
+
+- all_normal: val loss 0.11195, crash rate 35%, mean steps 33.2
+- default_mix: val loss 0.11245, crash rate 20%, mean steps 40.4
+- cautious_heavy: val loss 0.11508, crash rate 25%, mean steps 38.1
+- aggressive_heavy: val loss 0.11825, crash rate 40%, mean steps 30.8
+- all combined: val loss 0.11194, crash rate 10%, mean steps 45.2
+
+All crashes at rollout occur at step 2 (spawn collisions). The BC policy causes 0 self-crashes. Episodes hitting MAX_STEPS=50 indicate BC learned safe but not goal-directed behavior — addressed by Phase 7 PPO.
 
