@@ -107,13 +107,13 @@ python3 src/eval_policy.py --model models/bc_policy_all.pt --episodes 20 --no-mp
 
 Outputs: `models/bc_policy_{dataset}.pt` (weights) and `models/bc_policy_{dataset}.npz` (normalization stats). Both files are required at rollout time — `eval_policy.py` will error if the `.npz` is missing.
 
-**Phase 6 ablation summary (20-episode rollout, seed=0):**
+**Phase 6 ablation summary (100-episode rollout, seed=0):**
 
-- all_normal: val loss 0.11195, crash rate 35%, mean steps 33.2
-- default_mix: val loss 0.11245, crash rate 20%, mean steps 40.4
-- cautious_heavy: val loss 0.11508, crash rate 25%, mean steps 38.1
-- aggressive_heavy: val loss 0.11825, crash rate 40%, mean steps 30.8
-- all combined: val loss 0.11194, crash rate 10%, mean steps 45.2
+- all_normal: val loss 0.11195, crash rate 41%, mean steps 30.3
+- default_mix: val loss 0.11245, crash rate 12%, mean steps 44.2
+- cautious_heavy: val loss 0.11508, crash rate 26%, mean steps 37.5
+- aggressive_heavy: val loss 0.11825, crash rate 37%, mean steps 32.2
+- all combined: val loss 0.11194, crash rate 14%, mean steps 43.3
 
 All crashes at rollout occur at step 2 (spawn collisions). The BC policy causes 0 self-crashes. Episodes hitting MAX_STEPS=50 indicate BC learned safe but not goal-directed behavior — addressed by Phase 7 PPO.
 

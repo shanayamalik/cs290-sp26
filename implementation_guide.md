@@ -96,15 +96,15 @@ See `src/policy_network.py`, `src/train_policy.py`, `src/eval_policy.py`. Commit
 
 **Training:** 100 epochs, batch=256, lr=1e-3, ReduceLROnPlateau (patience=10, factor=0.5), MSE loss, 90/10 split. Mean-prediction baseline loss: 0.287 (BC achieves 0.112, ~61% reduction).
 
-**Ablation results (20-episode rollout each, seed=0, MAX_STEPS=50):**
+**Ablation results (100-episode rollout each, seed=0, MAX_STEPS=50):**
 
 | Dataset | Records | Best val loss | Crash rate | Mean steps |
 |---|---:|---:|---:|---:|
-| all_normal | 18,616 | 0.11195 | 35% | 33.2 |
-| default_mix | 18,913 | 0.11245 | 20% | 40.4 |
-| cautious_heavy | 18,933 | 0.11508 | 25% | 38.1 |
-| aggressive_heavy | 18,980 | 0.11825 | 40% | 30.8 |
-| **all (combined)** | **75,442** | **0.11194** | **10%** | **45.2** |
+| all_normal | 18,616 | 0.11195 | 41% | 30.3 |
+| default_mix | 18,913 | 0.11245 | 12% | 44.2 |
+| cautious_heavy | 18,933 | 0.11508 | 26% | 37.5 |
+| aggressive_heavy | 18,980 | 0.11825 | 37% | 32.2 |
+| **all (combined)** | **75,442** | **0.11194** | **14%** | **43.3** |
 
 All rollout crashes are at step 2 (spawn collisions). BC policy causes 0 self-crashes. Episodes hitting MAX_STEPS=50 show BC learned safe behavior but not goal-directed driving — classic distribution shift addressed by PPO.
 
