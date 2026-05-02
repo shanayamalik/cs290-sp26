@@ -35,6 +35,20 @@ from reward import NORMAL
 
 DRIVER_FNS = [make_cautious, make_normal, make_aggressive]
 
+# Named traffic mixes for cross-evaluation
+TRAFFIC_MIXES = {
+    "uniform":          [make_cautious, make_normal, make_aggressive],
+    "all_normal":       [make_normal],
+    "all_cautious":     [make_cautious],
+    "all_aggressive":   [make_aggressive],
+    "cautious_heavy":   [make_cautious, make_cautious, make_cautious, make_cautious,
+                         make_cautious, make_normal, make_normal, make_normal,
+                         make_normal, make_aggressive],  # ~50% cautious
+    "aggressive_heavy": [make_aggressive, make_aggressive, make_aggressive, make_aggressive,
+                         make_aggressive, make_normal, make_normal, make_normal,
+                         make_normal, make_cautious],   # ~50% aggressive
+}
+
 ENV_CONFIG = {
     "vehicles_count": 3,
     "controlled_vehicles": 1,
@@ -44,8 +58,11 @@ ENV_CONFIG = {
 MAX_STEPS = 50
 
 
-def run_episodes(env, action_fn, n_episodes: int, seed: int, label: str):
+def run_episodes(env, action_fn, n_episodes: int, seed: int, label: str,
+                 driver_fns: list = None):
     """Roll out action_fn for n_episodes, return summary stats."""
+    if driver_fns is None:
+        driver_fns = DRIVER_FNS
     rng = random.Random(seed)
     results = []
 
@@ -64,7 +81,7 @@ def run_episodes(env, action_fn, n_episodes: int, seed: int, label: str):
         if hasattr(action_fn, "reset"):
             action_fn.reset()
         for v in env.unwrapped.road.vehicles[1:]:
-            rng.choice(DRIVER_FNS)(v)
+            rng.choice(driver_fns)(v)
 
         speeds, dmins = [], []
         step = 0
@@ -101,6 +118,15 @@ def run_episodes(env, action_fn, n_episodes: int, seed: int, label: str):
     print(f"    Mean steps : {mean_steps:.1f}")
     print(f"    Mean speed : {mean_spd:.2f} m/s")
     print(f"    Mean min gap: {mean_gap:.2f} m")
+    crashed_steps = sorted([r["steps"] for r in results if r["crashed"]])
+    if crashed_steps:
+        from collections import Counter
+        counts = Counter(crashed_steps)
+        breakdown = ", ".join(f"step {s}: {c}x" for s, c in sorted(counts.items()))
+        spawn = sum(c for s, c in counts.items() if s <= 2)
+        late  = sum(c for s, c in counts.items() if s > 2)
+        print(f"    Crash steps: [{breakdown}]")
+        print(f"    Spawn (<=2): {spawn}  |  Late (>2): {late}")
     return results
 
 
@@ -110,7 +136,14 @@ def main():
     parser.add_argument("--episodes", type=int, default=20)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--no-mpc-baseline", action="store_true")
+    parser.add_argument(
+        "--traffic-mix",
+        choices=list(TRAFFIC_MIXES.keys()),
+        default="uniform",
+        help="NPC driver distribution during rollout (default: uniform random across all 3 types).",
+    )
     args = parser.parse_args()
+    driver_fns = TRAFFIC_MIXES[args.traffic_mix]
 
     model_path = Path(args.model)
     if not model_path.exists():
@@ -159,17 +192,21 @@ def main():
     env = gym.make("merge-v0", config=ENV_CONFIG)
 
     print(f"Model : {model_path}")
-    print(f"Episodes: {args.episodes} | Seed: {args.seed}")
+    print(f"Episodes: {args.episodes} | Seed: {args.seed} | Traffic: {args.traffic_mix}")
 
     # BC rollout
-    run_episodes(env, bc_action, args.episodes, args.seed, f"BC policy ({model_path.stem})")
+    run_episodes(env, bc_action, args.episodes, args.seed,
+                 f"BC policy ({model_path.stem}) | traffic={args.traffic_mix}",
+                 driver_fns=driver_fns)
 
     # MPC baseline on same seeds
     if not args.no_mpc_baseline:
         def mpc_action(obs):
             return mpc_select_action(env, theta=NORMAL)
 
-        run_episodes(env, mpc_action, args.episodes, args.seed, "MPC expert (NORMAL, baseline)")
+        run_episodes(env, mpc_action, args.episodes, args.seed,
+                     f"MPC expert (NORMAL, baseline) | traffic={args.traffic_mix}",
+                     driver_fns=driver_fns)
 
     env.close()
 

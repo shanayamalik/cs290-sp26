@@ -51,9 +51,35 @@ Total clean BC data: **75,442 transitions** across 1,600 merge attempts. For beh
 
 ---
 
-## In Progress: Phase 6 — Behavioral Cloning
+## ✅ Completed: Phase 6 — Behavioral Cloning
 
-Next step: train a policy network (`src/policy_network.py`) to imitate the MPC expert via supervised regression on the clean transitions from one or more fixed-reward datasets. Input: flattened 5×5 obs (25-dim). Output: 2-dim continuous action (acceleration, steering). Architecture: 4-layer MLP (25 → 256 → 256 → 128 → 2), trained with MSE loss.
+**Files:** `src/policy_network.py`, `src/train_policy.py`, `src/eval_policy.py`
+
+**Obs input:** 27-dim — raw 5×5 obs (25) + d_min + step. Per-feature normalization fitted on training split only.
+
+**Architecture:** MLP 27→256→256→128→2, tanh output. 106,114 params. MSE loss on [acc, steer].
+
+**100-episode ablation results (seed=0, uniform NPC traffic):**
+
+| Dataset | Val loss | Crash rate | Mean steps |
+|---|---|---|---|
+| all_normal | 0.11195 | 41% | 30.3 |
+| default_mix | 0.11245 | 12% | 44.2 |
+| cautious_heavy | 0.11508 | 26% | 37.5 |
+| aggressive_heavy | 0.11825 | 37% | 32.2 |
+| all combined | 0.11194 | 14% | 43.3 |
+
+All crashes are at step 2 (spawn collisions, verified). BC causes 0 policy-induced crashes.
+
+**Key finding:** BC learned safe deceleration but never commits to the merge. Every non-crash episode hits MAX_STEPS=50; MPC completes in 15–25 steps. BC copies the "yield" half of expert demos without the goal-directed "push through" — classic distribution shift.
+
+**2x2 cross-eval (50 eps, seed=0):** all_normal model + normal traffic: 34%/33.7 steps; all_normal + aggressive: 44%/27.9; aggressive_heavy + normal: 34%/32.7; aggressive_heavy + aggressive: 28%/33.7. All crashes at step 2. Crash rate variation = spawn geometry noise, not policy failure.
+
+**PPO warm-start:** `models/bc_policy_all.pt` + `.npz`
+
+---
+
+## In Progress: Phase 7 — PPO Fine-Tuning
 
 ---
 

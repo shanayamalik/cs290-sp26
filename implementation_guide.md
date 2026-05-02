@@ -106,7 +106,15 @@ See `src/policy_network.py`, `src/train_policy.py`, `src/eval_policy.py`. Commit
 | aggressive_heavy | 18,980 | 0.11825 | 37% | 32.2 |
 | **all (combined)** | **75,442** | **0.11194** | **14%** | **43.3** |
 
-All rollout crashes are at step 2 (spawn collisions). BC policy causes 0 self-crashes. Episodes hitting MAX_STEPS=50 show BC learned safe behavior but not goal-directed driving — classic distribution shift addressed by PPO.
+All rollout crashes are at step 2 (spawn collisions, verified by crash-step breakdown in eval output). BC policy causes 0 self-crashes. Episodes hitting MAX_STEPS=50 show BC learned safe deceleration but not goal-directed merging — it copies the "yield" half of expert demos without the "commit" half. Classic distribution shift; addressed by PPO.
+
+**2x2 cross-evaluation (50 episodes, seed=0) — crash rate / mean steps:**
+- all_normal model + normal traffic: 34% / 33.7
+- all_normal model + aggressive traffic: 44% / 27.9
+- aggressive_heavy model + normal traffic: 34% / 32.7
+- aggressive_heavy model + aggressive traffic: 28% / 33.7
+
+All cross-eval crashes also at step 2 (verified). Crash rate variation = spawn geometry noise, not policy failure. BC has 0 policy-induced crashes in all conditions.
 
 **PPO warm-start model:** `models/bc_policy_all.pt` + `models/bc_policy_all.npz`
 

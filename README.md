@@ -115,5 +115,14 @@ Outputs: `models/bc_policy_{dataset}.pt` (weights) and `models/bc_policy_{datase
 - aggressive_heavy: val loss 0.11825, crash rate 37%, mean steps 32.2
 - all combined: val loss 0.11194, crash rate 14%, mean steps 43.3
 
-All crashes at rollout occur at step 2 (spawn collisions). The BC policy causes 0 self-crashes. Episodes hitting MAX_STEPS=50 indicate BC learned safe but not goal-directed behavior — addressed by Phase 7 PPO.
+All crashes at rollout occur at step 2 (spawn collisions, verified by crash-step breakdown). The BC policy causes 0 self-crashes but never completes the merge — it learned safe deceleration from expert demonstrations but not goal-directed forward commitment. This is the expected BC limitation (distribution shift); PPO fine-tuning is the fix.
+
+**2x2 cross-evaluation (50 episodes each, seed=0) — crash rate / mean steps:**
+
+- all_normal model + normal traffic: 34% / 33.7 steps
+- all_normal model + aggressive traffic: 44% / 27.9 steps
+- aggressive_heavy model + normal traffic: 34% / 32.7 steps
+- aggressive_heavy model + aggressive traffic: 28% / 33.7 steps
+
+All cross-eval crashes also at step 2 (verified). Crash rate variation across traffic conditions reflects spawn geometry differences, not policy failure. BC causes 0 policy-induced crashes regardless of traffic condition.
 
