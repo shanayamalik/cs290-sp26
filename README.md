@@ -8,7 +8,7 @@ Extension of Sadigh et al. (2016) to multi-vehicle lane merging with 3+ agents. 
 
 Driver type parameters (in `src/driver_types.py`) are hand-tuned based on empirically observed ranges from Treiber et al. (2000) and map onto the Social Value Orientation taxonomy from Schwarting et al. (2019). They are not learned from data.
 
-**Progress:** Phases 1–6 complete (environment setup, driver types, reward functions, MPC expert, expert dataset generation, behavioral cloning). Starting Phase 7 (PPO fine-tuning).
+**Progress:** Phases 1–5 complete (environment setup, driver types, reward functions, MPC expert, expert dataset generation). Phase 6 behavioral cloning is implemented and under sanity-check evaluation before PPO fine-tuning.
 See [implementation_guide.md](implementation_guide.md) for the full step-by-step implementation plan.
 See [report_notes.md](report_notes.md) for things to address in the final paper writeup.
 
@@ -73,14 +73,23 @@ python3 src/run_mpc_episode.py
 ## Reproducing Phase 5 results (expert dataset generation)
 
 ```bash
-# Quick sanity check (5 episodes)
-python3 src/generate_data.py --episodes 5
+# Quick sanity check across the four traffic mixtures
+python3 src/generate_data.py --episodes 5 --all-mixes
 
-# Full dataset (200 episodes, ~3 min)
-python3 src/generate_data.py --episodes 200
+# Full datasets used for BC (400 episodes per mixture)
+python3 src/generate_data.py --episodes 400 --all-mixes
 ```
 
-Output saved to `data/expert_dataset.pkl` (excluded from git). Summary: 3564 total transitions, 3169 clean (non-crashed), ~1000 per driver type.
+Outputs are saved under `data/`:
+
+| mixture | records | clean records | crashes / episodes | crash rate |
+| --- | ---: | ---: | ---: | ---: |
+| all_normal | 18,718 | 18,616 | 10 / 400 | 2.5% |
+| default_mix | 18,983 | 18,913 | 8 / 400 | 2.0% |
+| cautious_heavy | 19,003 | 18,933 | 10 / 400 | 2.5% |
+| aggressive_heavy | 19,060 | 18,980 | 7 / 400 | 1.8% |
+
+Total clean transitions available for BC: 75,442.
 
 To run the best-response prediction tests:
 
@@ -102,10 +111,13 @@ python3 src/train_policy.py --dataset aggressive_heavy
 python3 src/train_policy.py --dataset all
 
 # Evaluate a model (20 rollout episodes)
-python3 src/eval_policy.py --model models/bc_policy_all.pt --episodes 20 --no-mpc-baseline
+python3 src/eval_policy.py --model models/bc_policy_all.pt --episodes 20 --traffic-mix default_mix --save-plot --no-mpc-baseline
+
+# Cross-evaluate the four single-mixture models
+python3 src/cross_eval_bc.py --episodes 50
 ```
 
-Outputs: `models/bc_policy_{dataset}.pt` (weights) and `models/bc_policy_{dataset}.npz` (normalization stats). Both files are required at rollout time — `eval_policy.py` will error if the `.npz` is missing.
+Outputs: `models/bc_policy_{dataset}.pt` (local weights), `models/bc_policy_{dataset}.npz` (normalization stats), and `plots/bc_policy_{dataset}_loss.csv/png` (loss curve). Both `.pt` and `.npz` are required at rollout time. The `.pt` weights are local training artifacts and may need to be regenerated before evaluation.
 
 **Phase 6 ablation summary (100-episode rollout, seed=0):**
 
@@ -125,4 +137,3 @@ All crashes at rollout occur at step 2 (spawn collisions, verified by crash-step
 - aggressive_heavy model + aggressive traffic: 28% / 33.7 steps
 
 All cross-eval crashes also at step 2 (verified). Crash rate variation across traffic conditions reflects spawn geometry differences, not policy failure. BC causes 0 policy-induced crashes regardless of traffic condition.
-

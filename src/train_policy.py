@@ -27,18 +27,24 @@ Usage:
 
 Output:
     models/bc_policy_{dataset}.pt  — trained model weights
-    Loss printed per epoch to stdout.
+    models/bc_policy_{dataset}.npz — observation normalization stats
+    plots/bc_policy_{dataset}_loss.csv/png — train/validation loss curve
 """
 
 import argparse
+import csv
+import os
 import pickle
 import sys
 from pathlib import Path
 
+Path(".cache/matplotlib").mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("MPLCONFIGDIR", ".cache/matplotlib")
+
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset, random_split
+from torch.utils.data import DataLoader, TensorDataset
 
 sys.path.insert(0, str(Path(__file__).parent))
 from policy_network import PolicyNetwork
@@ -58,6 +64,7 @@ BATCH_SIZE    = 256
 LR            = 1e-3
 VAL_FRACTION  = 0.1   # 10% held out for validation
 SEED          = 42
+PLOTS_DIR     = Path("plots")
 
 
 # ---------------------------------------------------------------------------
@@ -102,12 +109,78 @@ def compute_obs_stats(obs: torch.Tensor, train_indices):
     return mean, std
 
 
+def save_loss_curve(history: list[dict], model_out: Path) -> None:
+    """Save train/validation loss as CSV and PNG for mentor sanity checks."""
+    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+    csv_path = PLOTS_DIR / f"{model_out.stem}_loss.csv"
+    png_path = PLOTS_DIR / f"{model_out.stem}_loss.png"
+
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["epoch", "train_loss", "val_loss", "lr"])
+        writer.writeheader()
+        writer.writerows(history)
+
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        epochs = [r["epoch"] for r in history]
+        train_loss = [r["train_loss"] for r in history]
+        val_loss = [r["val_loss"] for r in history]
+        plt.figure(figsize=(7, 4))
+        plt.plot(epochs, train_loss, label="train")
+        plt.plot(epochs, val_loss, label="validation")
+        plt.xlabel("Epoch")
+        plt.ylabel("MSE loss")
+        plt.title(model_out.stem)
+        plt.grid(alpha=0.25)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(png_path, dpi=150)
+        plt.close()
+        print(f"Loss curve saved to: {png_path}")
+    except Exception as exc:
+        print(f"Warning: could not save loss PNG ({exc})")
+
+    print(f"Loss CSV saved to  : {csv_path}")
+
+
+def print_action_diagnostics(model: PolicyNetwork, obs_norm: torch.Tensor,
+                             actions: torch.Tensor, val_idx: torch.Tensor) -> None:
+    """Print prediction ranges so we can catch saturated or constant policies."""
+    model.eval()
+    with torch.no_grad():
+        pred = model(obs_norm[val_idx])
+        target = actions[val_idx]
+        mse = nn.functional.mse_loss(pred, target).item()
+        mean_baseline = target.mean(dim=0, keepdim=True).expand_as(target)
+        baseline_mse = nn.functional.mse_loss(mean_baseline, target).item()
+
+    def stats(t: torch.Tensor, col: int) -> str:
+        vals = t[:, col]
+        return (
+            f"min={vals.min(): .3f}, max={vals.max(): .3f}, "
+            f"mean={vals.mean(): .3f}, std={vals.std(): .3f}"
+        )
+
+    outside = ((pred < -1.0) | (pred > 1.0)).sum().item()
+    print("\nAction prediction diagnostics on validation split:")
+    print(f"  target acc  : {stats(target, 0)}")
+    print(f"  pred acc    : {stats(pred, 0)}")
+    print(f"  target steer: {stats(target, 1)}")
+    print(f"  pred steer  : {stats(pred, 1)}")
+    print(f"  pred outside [-1, 1]: {outside}")
+    print(f"  model MSE: {mse:.5f} | mean-action baseline MSE: {baseline_mse:.5f}")
+
+
 # ---------------------------------------------------------------------------
 # Training
 # ---------------------------------------------------------------------------
 
 def train(dataset_name: str, dataset_path: Path, model_out: Path) -> None:
     torch.manual_seed(SEED)
+    np.random.seed(SEED)
     model_out.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"\nLoading data...")
@@ -136,12 +209,13 @@ def train(dataset_name: str, dataset_path: Path, model_out: Path) -> None:
     train_ds = TensorDataset(obs_norm[train_idx], actions[train_idx])
     val_ds   = TensorDataset(obs_norm[val_idx],   actions[val_idx])
 
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
+    loader_gen = torch.Generator().manual_seed(SEED)
+    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, generator=loader_gen)
     val_loader   = DataLoader(val_ds,   batch_size=BATCH_SIZE, shuffle=False)
     print(f"  train: {n_train}, val: {n_val}")
 
     # Model
-    obs_dim    = obs.shape[1]   # 25
+    obs_dim    = obs.shape[1]   # flattened env obs + d_min + step = 27
     action_dim = actions.shape[1]  # 2
     model     = PolicyNetwork(obs_dim, action_dim)
     optimizer = torch.optim.Adam(model.parameters(), lr=LR)
@@ -157,6 +231,7 @@ def train(dataset_name: str, dataset_path: Path, model_out: Path) -> None:
     print("-" * 42)
 
     best_val_loss = float("inf")
+    history = []
 
     for epoch in range(1, EPOCHS + 1):
         # Train
@@ -182,6 +257,12 @@ def train(dataset_name: str, dataset_path: Path, model_out: Path) -> None:
 
         scheduler.step(val_loss)
         current_lr = optimizer.param_groups[0]["lr"]
+        history.append({
+            "epoch": epoch,
+            "train_loss": train_loss,
+            "val_loss": val_loss,
+            "lr": current_lr,
+        })
 
         if epoch % 10 == 0 or epoch == 1:
             print(f"{epoch:>6}  {train_loss:>10.5f}  {val_loss:>10.5f}  {current_lr:>8.2e}")
@@ -194,6 +275,12 @@ def train(dataset_name: str, dataset_path: Path, model_out: Path) -> None:
     print(f"\nBest val loss : {best_val_loss:.5f}")
     print(f"Model saved to: {model_out}")
     print(f"Norm stats at : {model_out.with_suffix('.npz')}")
+
+    save_loss_curve(history, model_out)
+
+    best_model = PolicyNetwork(obs_dim, action_dim)
+    best_model.load_state_dict(torch.load(model_out, weights_only=True))
+    print_action_diagnostics(best_model, obs_norm, actions, val_idx)
 
 
 # ---------------------------------------------------------------------------

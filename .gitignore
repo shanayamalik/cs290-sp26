@@ -1,5 +1,7 @@
 data/
 venv/
+.venv/
+.cache/
 models/*.pt
 plots/
 __pycache__/

@@ -86,15 +86,15 @@ python3 src/generate_data.py --episodes 5 --all-mixes  # sanity check
 
 ---
 
-## ✅ Phase 6: Behavioral Cloning — COMPLETE
+## Phase 6: Behavioral Cloning — IMPLEMENTED, SANITY CHECKING
 
-See `src/policy_network.py`, `src/train_policy.py`, `src/eval_policy.py`. Committed to `naya` branch.
+See `src/policy_network.py`, `src/train_policy.py`, `src/eval_policy.py`, and `src/cross_eval_bc.py`.
 
 **Obs augmentation:** Raw 5×5 obs (25 features) augmented with `d_min` (nearest vehicle gap) and `step` (episode progress) → 27-dim input. Normalized per-feature using training-split mean/std only (no data leakage). Stats saved to `models/bc_policy_{dataset}.npz` alongside weights.
 
 **Architecture:** MLP 27→256→256→128→2, tanh output (enforces [−1,1]). 106,114 params.
 
-**Training:** 100 epochs, batch=256, lr=1e-3, ReduceLROnPlateau (patience=10, factor=0.5), MSE loss, 90/10 split. Mean-prediction baseline loss: 0.287 (BC achieves 0.112, ~61% reduction).
+**Training:** 100 epochs, batch=256, lr=1e-3, ReduceLROnPlateau (patience=10, factor=0.5), MSE loss, 90/10 split. The training script filters to clean (`crashed=False`) records, saves loss CSV/PNG outputs, and prints validation action statistics so we can catch constant or saturated policies.
 
 **Ablation results (100-episode rollout each, seed=0, MAX_STEPS=50):**
 
@@ -116,13 +116,14 @@ All rollout crashes are at step 2 (spawn collisions, verified by crash-step brea
 
 All cross-eval crashes also at step 2 (verified). Crash rate variation = spawn geometry noise, not policy failure. BC has 0 policy-induced crashes in all conditions.
 
-**PPO warm-start model:** `models/bc_policy_all.pt` + `models/bc_policy_all.npz`
+**PPO warm-start model:** train `models/bc_policy_all.pt` + `models/bc_policy_all.npz` locally with the command below. The `.pt` file is a local artifact and may need to be regenerated before rollout/PPO.
 
 To reproduce:
 ```bash
 python3 src/train_policy.py --dataset all         # combined (PPO warm-start)
 python3 src/train_policy.py --dataset all_normal  # ablation (repeat for other mixes)
-python3 src/eval_policy.py --model models/bc_policy_all.pt --episodes 100 --no-mpc-baseline
+python3 src/eval_policy.py --model models/bc_policy_all.pt --episodes 100 --traffic-mix default_mix --save-plot --no-mpc-baseline
+python3 src/cross_eval_bc.py --episodes 50
 ```
 
 ---

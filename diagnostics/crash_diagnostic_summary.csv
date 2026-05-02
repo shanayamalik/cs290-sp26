@@ -1,0 +1,2 @@
+variant,all_normal_crash_rate,default_mix_crash_rate,cautious_heavy_crash_rate,aggressive_heavy_crash_rate,avg_min_distance,avg_reward,avg_runtime_per_episode
+collision_penalty_fix,0.04,0.04,0.08,0.0,4.978683128314136,27.442313359637765,0.6379900377050004

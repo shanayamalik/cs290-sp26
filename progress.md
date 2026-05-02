@@ -51,15 +51,28 @@ Total clean BC data: **75,442 transitions** across 1,600 merge attempts. For beh
 
 ---
 
-## ✅ Completed: Phase 6 — Behavioral Cloning
+## Phase 6 — Behavioral Cloning: Implemented, Needs Full Rerun
 
-**Files:** `src/policy_network.py`, `src/train_policy.py`, `src/eval_policy.py`
+**Files:** `src/policy_network.py`, `src/train_policy.py`, `src/eval_policy.py`, `src/cross_eval_bc.py`
 
 **Obs input:** 27-dim — raw 5×5 obs (25) + d_min + step. Per-feature normalization fitted on training split only.
 
 **Architecture:** MLP 27→256→256→128→2, tanh output. 106,114 params. MSE loss on [acc, steer].
 
-**100-episode ablation results (seed=0, uniform NPC traffic):**
+**What we changed and why:**
+
+- Kept the existing BC implementation instead of starting over, because the structure matches the project plan: supervised imitation of MPC expert actions from clean trajectories.
+- Updated `src/train_policy.py` to save loss curves (`plots/*_loss.csv/png`) and print validation action diagnostics. This lets us prove loss decreases, check predicted acceleration/steering ranges, and catch constant or saturated policies.
+- Confirmed BC trains only on clean records (`crashed=False`). This follows mentor feedback because our crash episodes are instant failures, not useful evasion examples.
+- Updated `src/eval_policy.py` to use the same continuous-action Highway-Env patch as data generation, add exact `default_mix` traffic, report reward, report negative-speed episodes, and optionally save a trajectory plot. This matters because crash rate alone can hide a bad policy that avoids crashes by braking/reversing.
+- Added `src/cross_eval_bc.py` for the 4x4 train-mixture x test-mixture evaluation. This directly supports the next sanity check: whether models trained on one traffic mixture generalize to the others.
+- Updated README / implementation guide language so BC is described as a PPO warm-start stage, not as the final driving controller.
+
+**Current status:** BC code is implemented and aligned with the implementation guide, but the BC phase is not fully "done" until we rerun the full training/evaluation with the new diagnostics. The expected role of BC is to initialize PPO, not to be the final policy.
+
+**Smoke test after fixes:** A 2-epoch all-normal training run executed successfully. It saved the loss CSV/PNG and printed action stats. Predicted actions stayed inside `[-1, 1]`, acceleration had nonzero variation, and steering stayed near zero as expected because the MPC expert always uses steering = 0.
+
+**Earlier 100-episode ablation results (seed=0, uniform NPC traffic):**
 
 | Dataset | Val loss | Crash rate | Mean steps |
 |---|---|---|---|
@@ -75,7 +88,7 @@ All crashes are at step 2 (spawn collisions, verified). BC causes 0 policy-induc
 
 **2x2 cross-eval (50 eps, seed=0):** all_normal model + normal traffic: 34%/33.7 steps; all_normal + aggressive: 44%/27.9; aggressive_heavy + normal: 34%/32.7; aggressive_heavy + aggressive: 28%/33.7. All crashes at step 2. Crash rate variation = spawn geometry noise, not policy failure.
 
-**PPO warm-start:** `models/bc_policy_all.pt` + `.npz`
+**PPO warm-start target:** train `models/bc_policy_all.pt` + `.npz` locally with `python3 src/train_policy.py --dataset all`; `.pt` files are local artifacts, so regenerate before evaluation if missing.
 
 ---
 
