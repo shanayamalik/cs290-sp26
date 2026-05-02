@@ -121,16 +121,9 @@ All cross-eval crashes also at step 2 (verified). Crash rate variation = spawn g
 To reproduce:
 ```bash
 python3 src/train_policy.py --dataset all         # combined (PPO warm-start)
-python3 src/train_policy.py --dataset all_normal  # ablation
-# ... repeat for default_mix, cautious_heavy, aggressive_heavy
-python3 src/eval_policy.py --model models/bc_policy_all.pt --episodes 20 --no-mpc-baseline
+python3 src/train_policy.py --dataset all_normal  # ablation (repeat for other mixes)
+python3 src/eval_policy.py --model models/bc_policy_all.pt --episodes 100 --no-mpc-baseline
 ```
-print("Saved distilled_policy.pt")
-```
-
-**Done when:** Loss decreases over epochs. Roll out the cloned policy in the environment and compare trajectories to the MPC expert side-by-side.
-
-> **Expected limitation:** Compounding errors at long horizons — this is normal and is exactly why RL fine-tuning is the next step.
 
 ---
 
