@@ -148,21 +148,27 @@ balanced training distribution, MSE = 0.061.
 
 ---
 
-## Questions for Codex
+## Notes for Phase 7 — PPO Approach
 
-1. **Speed clamp formula**: Is `min_acc_norm = -(ego_speed - 0.05) / ACC_SCALE` correct for
-   one-step Euler with `dt = 1.0 s`? Highway-Env uses internal sub-stepping at `dt = 0.1 s`
-   (10 sub-steps per `env.step()` call) — does this change the formula?
+These are our current thinking on implementation choices, open to discussion:
 
-2. **Rollout clamp threshold**: We used 2.0 m/s as the activation threshold. Is that too
-   conservative? A lower value (e.g., 0.5 m/s) would let the policy brake more freely and
-   might better reflect the expert's cautious behaviour.
+- **Speed clamp formula**: The formula `min_acc_norm = -(ego_speed - 0.05) / ACC_SCALE` is
+  approximately correct. Highway-Env sub-steps at 0.1 s internally (10 sub-steps per
+  `env.step()` call), so the single-step Euler assumption isn't exact — but the 0.05 m/s
+  buffer absorbs the sub-stepping error in practice. Likely fine as-is.
 
-3. **PPO warm-start strategy**: Should we freeze BC encoder layers for the first N steps, or
-   train all layers from the start with a reduced learning rate (e.g., 1e-4)? The BC actor
-   is already a reasonable initialisation — we want to preserve the yielding behaviour while
-   letting PPO learn when to commit to the merge.
+- **Rollout clamp threshold**: 2.0 m/s feels right. The goal is to prevent reversing, not
+  to micromanage near-zero speeds. A lower threshold (e.g. 0.5 m/s) might let the policy
+  oscillate around zero without ever committing to forward motion.
 
-4. **Crash handling in PPO**: All BC crashes are spawn collisions at step ≤ 3. Should PPO
-   training mask out episode reward for the first 3 steps, or just accept those crashes as
-   terminal states and let the value function learn around them?
+- **PPO warm-start strategy**: Leaning toward training all layers from the start with a low
+  learning rate (1e-4), rather than freezing the encoder. The BC representations were fit to
+  imitation, not to the RL objective — the early layers may need to adapt to learn when to
+  commit to the merge, not just how to avoid collisions.
+
+- **Crash handling in PPO**: Leaning toward treating spawn crashes as normal terminal states
+  and letting the value function learn around them, rather than masking the first 3 steps.
+  PPO handles early termination fine out of the box and the spawn crashes are a small enough
+  fraction that they shouldn't distort training.
+
+Open to whatever Codex suggests here — these are starting points, not firm decisions.
