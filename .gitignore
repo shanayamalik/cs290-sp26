@@ -3,6 +3,6 @@ venv/
 .venv/
 .cache/
 models/*.pt
-plots/
+plots/*.png
 __pycache__/
 *.pyc
