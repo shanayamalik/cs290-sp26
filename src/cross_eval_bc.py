@@ -54,8 +54,13 @@ class BCAction:
         d_min = float(min(np.linalg.norm(ego.position - v.position) for v in others)) if others else 100.0
         obs_aug = np.append(obs.reshape(-1), [d_min, float(self._step)]).astype(np.float32)
         obs_norm = (obs_aug - self.obs_mean) / self.obs_std
+        action = self.model.predict(obs_norm)
+        # Clamp action so ego speed cannot go below zero during rollout.
+        ego_speed = float(ego.speed)
+        if ego_speed < 2.0 and action[0] < 0:
+            action[0] = max(action[0], 0.0)
         self._step += 1
-        return self.model.predict(obs_norm)
+        return action
 
 
 def load_policy(model_path: Path) -> tuple[PolicyNetwork, np.ndarray, np.ndarray]:
@@ -120,7 +125,10 @@ def main():
         model_path = Path(args.models_dir) / f"bc_policy_{train_mix}.pt"
         row = [train_mix]
         for test_mix in MIXTURES:
+            print(f"  Running: train={train_mix} | test={test_mix} ({args.episodes} eps)...",
+                  flush=True)
             summary = evaluate_cell(model_path, test_mix, args.episodes, args.seed)
+            print(f"    -> {format_cell(summary)}", flush=True)
             row.append(format_cell(summary))
         rows.append(row)
 

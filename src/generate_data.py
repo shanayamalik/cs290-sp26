@@ -47,7 +47,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent))
 
 from driver_types import make_cautious, make_normal, make_aggressive
-from mpc_expert import mpc_select_action
+from mpc_expert import mpc_select_action, ACC_SCALE
 from reward import CAUTIOUS, NORMAL, AGGRESSIVE
 
 
@@ -178,6 +178,14 @@ def generate(n_episodes: int, output_path: Path, mix_name: str) -> None:
             d_min = _get_d_min(env)
 
             action = mpc_select_action(env, theta=theta)
+            # Prevent the simulator from reversing. The MPC planner clamps
+            # vx >= 0 internally, but env.step() has no floor. Clamp the action
+            # so next-step speed stays >= 0. A small buffer (0.01 m/s) eliminates
+            # floating-point epsilon negatives from the simulator's sub-stepping.
+            min_acc_norm = -(ego_speed - 0.05) / ACC_SCALE
+            if action[0] < min_acc_norm:
+                action = action.copy()
+                action[0] = float(min_acc_norm)
 
             record = {
                 "obs": obs.copy(),           # (5, 5) float32

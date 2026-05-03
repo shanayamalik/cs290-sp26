@@ -264,6 +264,10 @@ def main():
             obs_aug = np.append(obs.reshape(-1), aug).astype(np.float32)
             obs_norm = (obs_aug - obs_mean) / obs_std
             action  = model.predict(obs_norm)
+            # Clamp action so ego speed cannot go below zero during rollout.
+            ego_speed = float(ego.speed)
+            if ego_speed < 2.0 and action[0] < 0:
+                action[0] = max(action[0], 0.0)
             self._step += 1
             return action
 
