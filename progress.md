@@ -94,13 +94,36 @@ All models beat the mean-action baseline by ~30%.
 
 **Interpretation:** Distribution-shift pattern is clear — more cautious training data produces a more passive policy. `all_normal` learned to stop and yield indefinitely (v=0.5 m/s). `aggressive_heavy` drives at highway speed but crashes too often. `default_mix` is the best tradeoff: 12–26% crash (all spawn geometry), v=5–8.5 m/s, R=24–29.
 
-**PPO warm-start target: `models/bc_policy_default_mix.pt` + `models/bc_policy_default_mix.npz`**
+**PPO warm-start target:** use the combined BC model, `models/bc_policy_all.pt` + `models/bc_policy_all.npz`. The earlier note suggested `default_mix`, but clamp-rate logging showed the combined model was stronger across all mixtures: 0% crash in the 50-episode cross-eval, reasonable speed, and lower clamp dependence than the passive all-normal/cautious models.
 
 ---
 
 ## In Progress: Phase 7 — PPO Fine-Tuning
 
-Warm-starting from `models/bc_policy_default_mix.pt`. Plan: train all layers from the start with lr=1e-4 (no frozen layers). Treat spawn crashes as normal terminal states — no step masking. See `nathan.md` for full rationale and open questions for Codex.
+**Implemented:** `src/rl_finetune.py`
+
+**What it does:**
+- Wraps Highway-Env `merge-v0` with the same 27-dim observation representation used by BC: flattened 5x5 obs + `d_min` + `step`.
+- Loads BC normalization stats from `models/bc_policy_all.npz`.
+- Uses a PPO actor architecture matching BC: 27 -> 256 -> 256 -> 128 -> 2.
+- Warm-starts PPO actor weights from `models/bc_policy_all.pt`.
+- Uses a tanh-bounded PPO action mean so deterministic PPO actions match the BC convention of actions in `[-1, 1]`.
+- Applies the same no-reverse action safety clamp and reports clamp rate.
+- Uses a shaped RL reward that penalizes crash/reversing/clamp dependence and rewards forward speed/progress.
+
+**Smoke test run:** `python3 src/rl_finetune.py --timesteps 5000 --eval-episodes 10 --traffic-mix default_mix --out models/ppo_smoke_merge`
+
+| Check | Before PPO | After 5k PPO steps |
+|---|---:|---:|
+| Crash rate | 0.0% | 0.0% |
+| Mean reward | 8.00 | 155.72 |
+| Mean steps | 50.0 | 50.0 |
+| Mean speed | 4.00 m/s | 34.98 m/s |
+| Clamp rate | 58.8% | 0.0% |
+
+**Cross-mixture smoke eval after 5k PPO steps, 10 episodes each:** 0% crash on all_normal/default_mix/cautious_heavy/aggressive_heavy, mean speed about 35 m/s, clamp rate 0%.
+
+**Interpretation:** PPO wiring is working and quickly fixes the BC failure mode of slow/clamped driving. This is only a smoke result, not final Phase 7. The policy is now very fast and still hits the 50-step cap, so next we need a longer run plus a better completion metric/reward term to confirm it is actually completing the merge task efficiently rather than just driving fast.
 
 ---
 

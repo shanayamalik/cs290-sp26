@@ -44,6 +44,8 @@ class BCAction:
         self.obs_mean = obs_mean
         self.obs_std = obs_std
         self._step = 0
+        self.total_clamp_count = 0
+        self.total_action_count = 0
 
     def reset(self):
         self._step = 0
@@ -55,10 +57,12 @@ class BCAction:
         obs_aug = np.append(obs.reshape(-1), [d_min, float(self._step)]).astype(np.float32)
         obs_norm = (obs_aug - self.obs_mean) / self.obs_std
         action = self.model.predict(obs_norm)
+        self.total_action_count += 1
         # Clamp action so ego speed cannot go below zero during rollout.
         ego_speed = float(ego.speed)
         if ego_speed < 2.0 and action[0] < 0:
             action[0] = max(action[0], 0.0)
+            self.total_clamp_count += 1
         self._step += 1
         return action
 
@@ -105,7 +109,8 @@ def format_cell(summary: Optional[dict]) -> str:
     return (
         f"{100*summary['crash_rate']:.0f}% crash, "
         f"R={summary['mean_reward']:.1f}, "
-        f"v={summary['mean_speed']:.1f}"
+        f"v={summary['mean_speed']:.1f}, "
+        f"clamp={100*summary['clamp_activation_rate']:.0f}%"
     )
 
 

@@ -2,5 +2,8 @@ venv/
 .venv/
 .cache/
 plots/*.png
+plots/review_*
+models/review_*
+models/ppo_*.zip
 __pycache__/
 *.pyc

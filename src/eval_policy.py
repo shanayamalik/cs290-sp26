@@ -100,6 +100,8 @@ def run_episodes(env, action_fn, n_episodes: int, seed: int, label: str,
         total_reward = 0.0
         step = 0
         terminated = truncated = False
+        clamp_before = getattr(action_fn, "total_clamp_count", 0)
+        action_before = getattr(action_fn, "total_action_count", 0)
 
         while not (terminated or truncated) and step < MAX_STEPS:
             ego = env.unwrapped.road.vehicles[0]
@@ -124,6 +126,8 @@ def run_episodes(env, action_fn, n_episodes: int, seed: int, label: str,
         crashed = env.unwrapped.vehicle.crashed
         avg_spd = float(np.mean(speeds)) if speeds else 0.0
         min_gap = float(np.min(dmins)) if dmins else 100.0
+        clamp_delta = getattr(action_fn, "total_clamp_count", 0) - clamp_before
+        action_delta = getattr(action_fn, "total_action_count", 0) - action_before
 
         if verbose:
             print(
@@ -136,6 +140,8 @@ def run_episodes(env, action_fn, n_episodes: int, seed: int, label: str,
             "reward": total_reward,
             "avg_spd": avg_spd,
             "min_gap": min_gap,
+            "clamp_count": clamp_delta,
+            "action_count": action_delta,
         })
 
     summary = summarize_results(results)
@@ -156,6 +162,10 @@ def summarize_results(results: list[dict]) -> dict:
         "mean_speed": float(np.mean([r["avg_spd"] for r in results])),
         "mean_gap": float(np.mean([r["min_gap"] for r in results])),
         "negative_speed_rate": sum(r["avg_spd"] < 0.0 for r in results) / n,
+        "clamp_activation_rate": (
+            sum(r.get("clamp_count", 0) for r in results)
+            / max(sum(r.get("action_count", 0) for r in results), 1)
+        ),
     }
 
 
@@ -167,6 +177,7 @@ def print_summary(summary: dict, results: list[dict]) -> None:
     print(f"    Mean speed : {summary['mean_speed']:.2f} m/s")
     print(f"    Mean min gap: {summary['mean_gap']:.2f} m")
     print(f"    Negative-speed episodes: {100*summary['negative_speed_rate']:.1f}%")
+    print(f"    Rollout speed-clamp activations: {100*summary['clamp_activation_rate']:.1f}%")
     crashed_steps = sorted([r["steps"] for r in results if r["crashed"]])
     if crashed_steps:
         from collections import Counter
@@ -250,6 +261,8 @@ def main():
         """Stateful callable: appends d_min + step to obs, normalizes, then runs model."""
         def __init__(self):
             self._step = 0
+            self.total_clamp_count = 0
+            self.total_action_count = 0
 
         def reset(self):
             self._step = 0
@@ -264,10 +277,12 @@ def main():
             obs_aug = np.append(obs.reshape(-1), aug).astype(np.float32)
             obs_norm = (obs_aug - obs_mean) / obs_std
             action  = model.predict(obs_norm)
+            self.total_action_count += 1
             # Clamp action so ego speed cannot go below zero during rollout.
             ego_speed = float(ego.speed)
             if ego_speed < 2.0 and action[0] < 0:
                 action[0] = max(action[0], 0.0)
+                self.total_clamp_count += 1
             self._step += 1
             return action
 

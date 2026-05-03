@@ -155,6 +155,8 @@ def generate(n_episodes: int, output_path: Path, mix_name: str) -> None:
     env = gym.make("merge-v0", config=ENV_CONFIG)
     dataset = []
     crash_count = 0
+    clamp_count = 0
+    action_count = 0
 
     print(f"\nGenerating dataset: {mix_name}")
     print(f"  Driver mix: {driver_mix}")
@@ -180,12 +182,16 @@ def generate(n_episodes: int, output_path: Path, mix_name: str) -> None:
             action = mpc_select_action(env, theta=theta)
             # Prevent the simulator from reversing. The MPC planner clamps
             # vx >= 0 internally, but env.step() has no floor. Clamp the action
-            # so next-step speed stays >= 0. A small buffer (0.01 m/s) eliminates
+            # so next-step speed stays >= 0. A small buffer (0.05 m/s) eliminates
             # floating-point epsilon negatives from the simulator's sub-stepping.
             min_acc_norm = -(ego_speed - 0.05) / ACC_SCALE
+            speed_clamp_applied = False
+            action_count += 1
             if action[0] < min_acc_norm:
                 action = action.copy()
-                action[0] = float(min_acc_norm)
+                action[0] = float(np.clip(min_acc_norm, -1.0, 1.0))
+                speed_clamp_applied = True
+                clamp_count += 1
 
             record = {
                 "obs": obs.copy(),           # (5, 5) float32
@@ -198,6 +204,7 @@ def generate(n_episodes: int, output_path: Path, mix_name: str) -> None:
                 "d_min": d_min,
                 "driver_mix": mix_name,
                 "npc_driver_types": npc_driver_types.copy(),
+                "speed_clamp_applied": speed_clamp_applied,
             }
             dataset.append(record)
 
@@ -233,6 +240,8 @@ def generate(n_episodes: int, output_path: Path, mix_name: str) -> None:
         print(f"  Obs shape         : {dataset[0]['obs'].shape}")
         print(f"  Action shape      : {dataset[0]['action'].shape}")
         print(f"  Keys              : {list(dataset[0].keys())}")
+        print(f"  Speed clamps      : {clamp_count}/{action_count} "
+              f"({100*clamp_count/max(action_count, 1):.1f}%)")
 
 
 if __name__ == "__main__":
