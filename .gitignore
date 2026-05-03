@@ -1,8 +1,6 @@
-data/
 venv/
 .venv/
 .cache/
-models/*.pt
 plots/*.png
 __pycache__/
 *.pyc
