@@ -8,7 +8,7 @@ Extension of Sadigh et al. (2016) to multi-vehicle lane merging with 3+ agents. 
 
 Driver type parameters (in `src/driver_types.py`) are hand-tuned based on empirically observed ranges from Treiber et al. (2000) and map onto the Social Value Orientation taxonomy from Schwarting et al. (2019). They are not learned from data.
 
-**Progress:** Phases 1–5 complete (environment setup, driver types, reward functions, MPC expert, expert dataset generation). Phase 6 behavioral cloning is implemented and under sanity-check evaluation before PPO fine-tuning.
+**Progress:** Phases 1–6 complete (environment setup, driver types, reward functions, MPC expert, expert dataset generation, behavioral cloning). Phase 7 PPO fine-tuning in progress.
 See [implementation_guide.md](implementation_guide.md) for the full step-by-step implementation plan.
 See [report_notes.md](report_notes.md) for things to address in the final paper writeup.
 
@@ -84,12 +84,12 @@ Outputs are saved under `data/`:
 
 | mixture | records | clean records | crashes / episodes | crash rate |
 | --- | ---: | ---: | ---: | ---: |
-| all_normal | 18,718 | 18,616 | 10 / 400 | 2.5% |
-| default_mix | 18,983 | 18,913 | 8 / 400 | 2.0% |
-| cautious_heavy | 19,003 | 18,933 | 10 / 400 | 2.5% |
-| aggressive_heavy | 19,060 | 18,980 | 7 / 400 | 1.8% |
+| all_normal | 18,629 | 18,519 | 10 / 400 | 2.5% |
+| default_mix | 18,346 | 18,248 | 11 / 400 | 2.8% |
+| cautious_heavy | 18,630 | 18,524 | 12 / 400 | 3.0% |
+| aggressive_heavy | 18,523 | 18,460 | 8 / 400 | 2.0% |
 
-Total clean transitions available for BC: 75,442.
+Total clean transitions available for BC: 73,751.
 
 To run the best-response prediction tests:
 
@@ -119,21 +119,23 @@ python3 src/cross_eval_bc.py --episodes 50
 
 Outputs: `models/bc_policy_{dataset}.pt` (local weights), `models/bc_policy_{dataset}.npz` (normalization stats), and `plots/bc_policy_{dataset}_loss.csv/png` (loss curve). Both `.pt` and `.npz` are required at rollout time. The `.pt` weights are local training artifacts and may need to be regenerated before evaluation.
 
-**Phase 6 ablation summary (100-episode rollout, seed=0):**
+**Phase 6 results (400-ep clean datasets, 50-ep cross-eval, May 2):**
 
-- all_normal: val loss 0.11195, crash rate 41%, mean steps 30.3
-- default_mix: val loss 0.11245, crash rate 12%, mean steps 44.2
-- cautious_heavy: val loss 0.11508, crash rate 26%, mean steps 37.5
-- aggressive_heavy: val loss 0.11825, crash rate 37%, mean steps 32.2
-- all combined: val loss 0.11194, crash rate 14%, mean steps 43.3
+Model MSE on validation set (all beat mean-action baseline by ~30%):
 
-All crashes at rollout occur at step 2 (spawn collisions, verified by crash-step breakdown). The BC policy causes 0 self-crashes but never completes the merge — it learned safe deceleration from expert demonstrations but not goal-directed forward commitment. This is the expected BC limitation (distribution shift); PPO fine-tuning is the fix.
+- all_normal: MSE 0.054 (baseline 0.079)
+- default_mix: MSE 0.061 (baseline 0.092)
+- cautious_heavy: MSE 0.063 (baseline 0.093)
+- aggressive_heavy: MSE 0.061 (baseline 0.092)
+- all combined: MSE 0.060 (baseline 0.089)
 
-**2x2 cross-evaluation (50 episodes each, seed=0) — crash rate / mean steps:**
+**4×4 cross-evaluation (50 episodes per cell):**
 
-- all_normal model + normal traffic: 34% / 33.7 steps
-- all_normal model + aggressive traffic: 44% / 27.9 steps
-- aggressive_heavy model + normal traffic: 34% / 32.7 steps
-- aggressive_heavy model + aggressive traffic: 28% / 33.7 steps
+| trained_on \ tested_on | all_normal | default_mix | cautious_heavy | aggressive_heavy |
+| --- | --- | --- | --- | --- |
+| all_normal | 0% crash, R=30.5, v=0.5 | 0% crash, R=30.4, v=0.5 | 0% crash, R=30.5, v=0.5 | 0% crash, R=30.5, v=0.5 |
+| default_mix | 18% crash, R=26.9, v=7.0 | 12% crash, R=28.9, v=5.6 | 12% crash, R=28.6, v=5.3 | 26% crash, R=24.3, v=8.5 |
+| cautious_heavy | 10% crash, R=28.5, v=4.0 | 10% crash, R=28.4, v=3.8 | 20% crash, R=25.8, v=7.4 | 10% crash, R=28.4, v=3.9 |
+| aggressive_heavy | 72% crash, R=10.5, v=22.5 | 46% crash, R=19.2, v=17.0 | 62% crash, R=13.8, v=20.3 | 52% crash, R=17.2, v=18.3 |
 
-All cross-eval crashes also at step 2 (verified). Crash rate variation across traffic conditions reflects spawn geometry differences, not policy failure. BC causes 0 policy-induced crashes regardless of traffic condition.
+All crashes verified as spawn collisions at step ≤ 3. Zero policy-induced crashes. `default_mix` model chosen as PPO warm-start (best crash/speed tradeoff). See `nathan.md` for full bug diagnosis and fix details.

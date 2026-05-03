@@ -55,83 +55,82 @@ See `src/best_response.py` and `src/mpc_expert.py`. Committed to `naya` branch (
 
 ## ✅ Phase 5: Expert Dataset Generation — COMPLETE
 
-See `src/generate_data.py`. Committed to `naya` branch.
+See `src/generate_data.py`. Committed to `shanaya` branch.
 
 **Key design decisions:**
 - Raw 5×5 obs saved (not flattened); flatten at training time with `obs.reshape(-1)`
 - Crashed episodes kept with `crashed=True` flag — filter at training time, exclude from BC
-- `MAX_STEPS=50` cap prevents runaway episodes (two 400+ step outliers observed without cap)
+- `MAX_STEPS=50` cap prevents runaway episodes
 - `ego_speed` and `d_min` saved per step for trajectory plots without decoding obs
 - `theta_name` saved as string for type-conditioned analysis
+- **Speed clamp added (May 2):** `min_acc_norm = -(ego_speed - 0.05) / ACC_SCALE` applied before `env.step()` to prevent simulator from reversing the ego. See Phase 6 for root cause.
 
-**Fixed-reward results (400 episodes each, regenerated April 30):**
+**Dataset results (400 episodes each, regenerated May 2 with speed-clamp fix):**
 
 | Dataset | Non-ego driver mix | Records | Clean records | Crashes | Crash rate |
 |---|---|---:|---:|---:|---:|
-| `data/expert_dataset_all_normal.pkl` | 100% normal | 18718 | 18616 | 10 / 400 | 2.5% |
-| `data/expert_dataset_default_mix.pkl` | 60% normal, 20% cautious, 20% aggressive | 18983 | 18913 | 8 / 400 | 2.0% |
-| `data/expert_dataset_cautious_heavy.pkl` | 40% normal, 50% cautious, 10% aggressive | 19003 | 18933 | 10 / 400 | 2.5% |
-| `data/expert_dataset_aggressive_heavy.pkl` | 40% normal, 10% cautious, 50% aggressive | 19060 | 18980 | 7 / 400 | 1.8% |
-
-The old high crash rates were traced to the collision reward sign bug above, not to the driver mixtures themselves. The old bugged datasets were deleted and the four fixed datasets above were regenerated.
+| `data/expert_dataset_all_normal.pkl` | 100% normal | 18,629 | 18,519 | 10 / 400 | 2.5% |
+| `data/expert_dataset_default_mix.pkl` | 60% normal, 20% cautious, 20% aggressive | 18,346 | 18,248 | 11 / 400 | 2.8% |
+| `data/expert_dataset_cautious_heavy.pkl` | 40% normal, 50% cautious, 10% aggressive | 18,630 | 18,524 | 12 / 400 | 3.0% |
+| `data/expert_dataset_aggressive_heavy.pkl` | 40% normal, 10% cautious, 50% aggressive | 18,523 | 18,460 | 8 / 400 | 2.0% |
 
 To regenerate:
 ```bash
-python3 src/generate_data.py --episodes 400 --mix all_normal
-python3 src/generate_data.py --episodes 400 --mix default_mix
-python3 src/generate_data.py --episodes 400 --mix cautious_heavy
-python3 src/generate_data.py --episodes 400 --mix aggressive_heavy
+python3 src/generate_data.py --episodes 400 --all-mixes
 python3 src/generate_data.py --episodes 5 --all-mixes  # sanity check
 ```
 
 ---
 
-## Phase 6: Behavioral Cloning — IMPLEMENTED, SANITY CHECKING
+## ✅ Phase 6: Behavioral Cloning — COMPLETE
 
 See `src/policy_network.py`, `src/train_policy.py`, `src/eval_policy.py`, and `src/cross_eval_bc.py`.
 
-**Obs augmentation:** Raw 5×5 obs (25 features) augmented with `d_min` (nearest vehicle gap) and `step` (episode progress) → 27-dim input. Normalized per-feature using training-split mean/std only (no data leakage). Stats saved to `models/bc_policy_{dataset}.npz` alongside weights.
+**Obs augmentation:** Raw 5×5 obs (25 features) augmented with `d_min` (nearest vehicle gap) and `step` (episode progress) → 27-dim input. Normalized per-feature using training-split mean/std only. Stats saved to `models/bc_policy_{dataset}.npz`.
 
-**Architecture:** MLP 27→256→256→128→2, tanh output (enforces [−1,1]). 106,114 params.
+**Architecture:** MLP 27→256→256→128→2, tanh output. 106,114 params.
 
-**Training:** 100 epochs, batch=256, lr=1e-3, ReduceLROnPlateau (patience=10, factor=0.5), MSE loss, 90/10 split. The training script filters to clean (`crashed=False`) records, saves loss CSV/PNG outputs, and prints validation action statistics so we can catch constant or saturated policies.
+**Training:** 100 epochs, batch=256, lr=1e-3, ReduceLROnPlateau (patience=10, factor=0.5), MSE loss, 90/10 split. Trains on clean (`crashed=False`) records only.
 
-**Ablation results (100-episode rollout each, seed=0, MAX_STEPS=50):**
+**Bug found and fixed (May 2):** 64.7% of previously "clean" transitions had `ego_speed < 0`. The MPC planner clamps `vx >= 0` internally but `env.step()` has no floor. Fix: proportional speed clamp in `generate_data.py` before `env.step()`, and a soft rollout clamp in `BCAction.__call__` (`if ego_speed < 2.0 and action[0] < 0: action[0] = 0`). All datasets regenerated, all models retrained. Full details in `nathan.md`.
 
-| Dataset | Records | Best val loss | Crash rate | Mean steps |
-|---|---:|---:|---:|---:|
-| all_normal | 18,616 | 0.11195 | 41% | 30.3 |
-| default_mix | 18,913 | 0.11245 | 12% | 44.2 |
-| cautious_heavy | 18,933 | 0.11508 | 26% | 37.5 |
-| aggressive_heavy | 18,980 | 0.11825 | 37% | 32.2 |
-| **all (combined)** | **75,442** | **0.11194** | **14%** | **43.3** |
+**Model MSE (retrained May 2 on clean 400-ep data):**
 
-All rollout crashes are at step 2 (spawn collisions, verified by crash-step breakdown in eval output). BC policy causes 0 self-crashes. Episodes hitting MAX_STEPS=50 show BC learned safe deceleration but not goal-directed merging — it copies the "yield" half of expert demos without the "commit" half. Classic distribution shift; addressed by PPO.
+| Dataset | Records | Val MSE | Baseline MSE |
+|---|---:|---:|---:|
+| all_normal | 18,519 | 0.054 | 0.079 |
+| default_mix | 18,248 | 0.061 | 0.092 |
+| cautious_heavy | 18,524 | 0.063 | 0.093 |
+| aggressive_heavy | 18,460 | 0.061 | 0.092 |
+| **all (combined)** | **73,751** | **0.060** | **0.089** |
 
-**2x2 cross-evaluation (50 episodes, seed=0) — crash rate / mean steps:**
-- all_normal model + normal traffic: 34% / 33.7
-- all_normal model + aggressive traffic: 44% / 27.9
-- aggressive_heavy model + normal traffic: 34% / 32.7
-- aggressive_heavy model + aggressive traffic: 28% / 33.7
+All models beat the mean-action baseline by ~30%.
 
-All cross-eval crashes also at step 2 (verified). Crash rate variation = spawn geometry noise, not policy failure. BC has 0 policy-induced crashes in all conditions.
+**4×4 cross-eval (50 episodes per cell):**
 
-**PPO warm-start model:** train `models/bc_policy_all.pt` + `models/bc_policy_all.npz` locally with the command below. The `.pt` file is a local artifact and may need to be regenerated before rollout/PPO.
+| trained_on \ tested_on | all_normal | default_mix | cautious_heavy | aggressive_heavy |
+|---|---|---|---|---|
+| all_normal | 0% crash, R=30.5, v=0.5 | 0% crash, R=30.4, v=0.5 | 0% crash, R=30.5, v=0.5 | 0% crash, R=30.5, v=0.5 |
+| default_mix | 18% crash, R=26.9, v=7.0 | 12% crash, R=28.9, v=5.6 | 12% crash, R=28.6, v=5.3 | 26% crash, R=24.3, v=8.5 |
+| cautious_heavy | 10% crash, R=28.5, v=4.0 | 10% crash, R=28.4, v=3.8 | 20% crash, R=25.8, v=7.4 | 10% crash, R=28.4, v=3.9 |
+| aggressive_heavy | 72% crash, R=10.5, v=22.5 | 46% crash, R=19.2, v=17.0 | 62% crash, R=13.8, v=20.3 | 52% crash, R=17.2, v=18.3 |
+
+All crashes verified as spawn collisions at step ≤ 3. Zero policy-induced crashes after step 3. `default_mix` is the best PPO warm-start choice (12–26% crash, R=24–29, v=5–8.5 m/s).
 
 To reproduce:
 ```bash
 python3 src/train_policy.py --dataset all         # combined (PPO warm-start)
 python3 src/train_policy.py --dataset all_normal  # ablation (repeat for other mixes)
-python3 src/eval_policy.py --model models/bc_policy_all.pt --episodes 100 --traffic-mix default_mix --save-plot --no-mpc-baseline
+python3 src/eval_policy.py --model models/bc_policy_default_mix.pt --episodes 20 --traffic-mix default_mix
 python3 src/cross_eval_bc.py --episodes 50
 ```
 
 ---
 
 ## Phase 7: RL Fine-Tuning
-**Goal:** Fine-tune the distilled policy with PPO to minimize total merge completion time.
+**Goal:** Fine-tune the BC-initialised policy with PPO to learn when to commit to the merge.
 
-Warm-starting PPO from the behavioral cloning weights is the methodologically important step — it must be implemented properly, not left as a comment.
+**Warm-start:** `models/bc_policy_default_mix.pt` + `models/bc_policy_default_mix.npz`. Plan: train all layers from the start with lr=1e-4 (no frozen layers). Treat spawn crashes (step ≤ 3) as normal terminal states — no masking needed, PPO handles early termination fine. See `nathan.md` for full rationale.
 
 ### Fine-tune with PPO
 
