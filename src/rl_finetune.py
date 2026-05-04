@@ -104,7 +104,12 @@ class MergePPOWrapper(gym.Wrapper):
         self.prev_x = x
 
         crashed = bool(self.env.unwrapped.vehicle.crashed)
-        truncated = truncated or self.step_count >= self.max_steps
+        # Override highway-env's unreachable termination threshold (x > 370).
+        # Road curves mean position[0] peaks at ~333-343m then decreases, so
+        # the built-in condition never fires. Use x > 330 instead.
+        if x > 330.0 and not crashed:
+            terminated = True
+        truncated = (not terminated) and (truncated or self.step_count >= self.max_steps)
         reward = self._rl_reward(float(env_reward), speed, dx, x, crashed, terminated, truncated, speed_clamped)
         info = dict(info)
         info.update({
