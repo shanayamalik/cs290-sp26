@@ -76,13 +76,15 @@ All runs: `--traffic-mix default_mix`, warm-started from `bc_policy_default_mix.
 | 20k PPO | 20k | 20 | 0.0% | 58.36 | 23.75 m/s | ~50 | 0% |
 | 100k PPO | 100k | 20 | 0.0% | 77.60 | 21.35 m/s | ~50 | 0% |
 | 500k v1 (milestones, MAX_STEPS=50) | 500k | 50 | 0.0% | 117.25 | 19.69 m/s | 49.5 | 0% |
-| **500k v2 (milestones + MAX_STEPS=150)** | 500k | 50 | 0.0% | **250.86** | **20.22 m/s** | 150.0 | **0%** |
+| 500k v2 (milestones + MAX_STEPS=150) | 500k | 50 | 0.0% | 250.86 | 20.22 m/s | 150.0 | 0% |
+| **500k v3 (+ x>330 completion override)** | 500k | 50 | 0.0% | **261.44** | **18.67 m/s** | 150.0 | **0%** |
 
-**Note:** `mean_steps=150.0` in the final run means the step budget is still the binding
-constraint — `terminated` appears to never fire in `merge-v0` regardless of x-position. The ego
-is reaching the end of the road but the env does not set `terminated=True`. The reward numbers
-across runs are not directly comparable (reward function changed); use **speed** and **crash rate**
-as primary metrics in the paper.
+**Note:** `mean_steps=150.0` across v2 and v3 means the step budget remains the binding
+constraint in eval. The x>330 override does fire occasionally during training (ep_len_mean
+≈146–147 in the SB3 rollout logs vs the hard cap of 150), but does not trigger consistently
+enough to reduce mean_steps in 50-episode eval. The reward numbers across runs are not
+directly comparable (reward function changed); use **crash rate** and **mean speed** as primary
+metrics in the paper.
 
 ---
 
@@ -90,49 +92,38 @@ as primary metrics in the paper.
 
 - `models/ppo_100k_merge.zip` — 100k baseline
 - `models/ppo_500k_merge.zip` — 500k v1 (milestones, old MAX_STEPS=50)
-- `models/ppo_500k_v2_merge.zip` — **best model** (milestones + MAX_STEPS=150)
-- `models/ppo_500k_v2_merge_{100,200,300,400,500}k_steps.zip` — learning curve checkpoints
+- `models/ppo_500k_v2_merge.zip` — 500k v2 (milestones + MAX_STEPS=150)
+- `models/ppo_500k_v2_merge_{100,200,300,400,500}k_steps.zip` — v2 learning curve checkpoints
+- `models/ppo_500k_v3_merge.zip` — **best model** (+ x>330 completion override)
 
 ---
 
-## Status — Results Not Final, Rerun in Progress
+## Status — Phase 7 Complete
 
-The 500k v2 results above (crash=0%, speed=20.22 m/s, reward=250.86) are real but **not the
-final numbers** — we are rerunning at 500k again (v3) with one more fix before locking results.
+**Final model:** `models/ppo_500k_v3_merge.zip` — crash=0%, speed=18.67 m/s, reward=261.44.
 
-**Why we're rerunning:**
-
-We discovered that `MergeEnv._is_terminated()` checks `position[0] > 370`, but the road's
-sine-lane geometry causes `position[0]` to peak at ~333–343m and then *decrease* as the vehicle
-follows the curve. The 370m threshold is geometrically unreachable — the `+20` completion reward
-and the `terminated=True` branch have **never fired in any of our training runs.**
-
-We are overriding the termination condition in `MergePPOWrapper.step()` with a reachable
-threshold based on our diagnostic data:
+**What was fixed in v3 vs v2:** `MergeEnv._is_terminated()` checks `position[0] > 370`, but the
+road's sine-lane geometry causes `position[0]` to peak at ~333–343m and then *decrease* as the
+vehicle follows the curve. The 370m threshold is geometrically unreachable — the `+20` completion
+bonus had never fired in any prior training run. v3 overrides this in `MergePPOWrapper.step()`:
 ```python
+# Override unreachable highway-env threshold (x>370) — road curves, x peaks at ~340m
 if x > 330.0 and not crashed:
     terminated = True
-    reward += 20.0  # completion bonus
 ```
+This fires occasionally during training (ep_len_mean ≈146–147 vs cap of 150 in SB3 logs) but
+the reward improvement over v2 is modest (+10.58 reward, speed slightly lower at 18.67 vs 20.22
+m/s). The merge task geometry is the main limiting factor.
 
-**Why 500k again (not 100k):** the 500k v2 run showed PPO needs the full budget to consistently
-reach x ≈ 340m. At 100k the policy was still exploring and didn't reliably make it that far.
-500k gives the value function enough updates to make the completion bonus actually useful as a
-learning signal.
-
-The v3 run (~90 min) will be the first run where PPO can actually learn to complete the merge.
-We'll update this file with results once it finishes.
-
-**Code is on the `shanu` branch** — all changes committed and pushed. Nathan can see the full
-diff and the current `src/rl_finetune.py` there.
+**Code is on the `shanu` branch** — all changes committed and pushed.
 
 ---
 
-## After v3 Completes — Shanaya Will
+## Next Steps (Phase 8)
 
-1. Update this file with v3 eval results (50 episodes)
-2. Plot training curve from v2 checkpoints (100k–500k) → presentation figure
-3. Coordinate with Nathan on Phase 8 (MPC/BC/PPO cross-eval) once v3 results are in
+1. Plot training curve from v2 checkpoints (100k–500k) → presentation figure
+2. Cross-eval: MPC / BC / PPO on the same 50-episode eval set (coordinate with Nathan)
+3. Final paper numbers should use `ppo_500k_v3_merge.zip` for the PPO agent
 
 ---
 
