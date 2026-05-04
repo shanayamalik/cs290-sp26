@@ -310,7 +310,7 @@ def main():
     print_eval("Before PPO fine-tuning", before)
 
     print(f"\nTraining PPO for {args.timesteps} timesteps...")
-    model.learn(total_timesteps=args.timesteps, progress_bar=False)
+    model.learn(total_timesteps=args.timesteps, progress_bar=True)
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
