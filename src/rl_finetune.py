@@ -27,6 +27,7 @@ import numpy as np
 import torch
 from gymnasium import spaces
 from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.policies import ActorCriticPolicy
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -310,9 +311,15 @@ def main():
     print_eval("Before PPO fine-tuning", before)
 
     print(f"\nTraining PPO for {args.timesteps} timesteps...")
-    model.learn(total_timesteps=args.timesteps, progress_bar=True)
-
     out_path = Path(args.out)
+    checkpoint_cb = CheckpointCallback(
+        save_freq=25_000,
+        save_path=str(out_path.parent),
+        name_prefix=out_path.name,
+        verbose=1,
+    )
+    model.learn(total_timesteps=args.timesteps, callback=checkpoint_cb, progress_bar=True)
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
     model.save(out_path)
     print(f"\nSaved PPO model to {out_path}.zip")
