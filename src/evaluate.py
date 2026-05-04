@@ -14,7 +14,7 @@ Methods:
 Examples:
     python3 src/evaluate.py --episodes 20 --traffic-mix default_mix
     python3 src/evaluate.py --methods baseline mpc --episodes 20
-    python3 src/evaluate.py --ppo-model models/ppo_500k_v3_merge.zip
+    python3 src/evaluate.py --ppo-model models/ppo_500k_v2_merge.zip
 """
 
 import argparse
@@ -309,7 +309,7 @@ def main():
     parser.add_argument("--traffic-mix", choices=list(TRAFFIC_MIXES.keys()), default="default_mix")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--bc-model", type=str, default="models/bc_policy_default_mix.pt")
-    parser.add_argument("--ppo-model", type=str, default="models/ppo_500k_v3_merge.zip")
+    parser.add_argument("--ppo-model", type=str, default="models/ppo_500k_v2_merge.zip")
     parser.add_argument("--ppo-bc-model", type=str, default="models/bc_policy_default_mix.pt")
     parser.add_argument("--output", type=str, default="diagnostics/final_evaluation_summary.csv")
     args = parser.parse_args()
