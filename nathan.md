@@ -92,64 +92,41 @@ metrics in the paper.
 
 - `models/ppo_100k_merge.zip` — 100k baseline
 - `models/ppo_500k_merge.zip` — 500k v1 (milestones, old MAX_STEPS=50)
-- `models/ppo_500k_v2_merge.zip` — 500k v2 (milestones + MAX_STEPS=150)
+- `models/ppo_500k_v2_merge.zip` — **final model** (milestones + MAX_STEPS=150)
 - `models/ppo_500k_v2_merge_{100,200,300,400,500}k_steps.zip` — v2 learning curve checkpoints
-- `models/ppo_500k_v3_merge.zip` — **best model** (+ x>330 completion override)
+- `models/ppo_500k_v3_merge.zip` — v3 (x>330 termination override, do not use — see below)
 
 ---
 
 ## Status — Phase 7 Complete ✓
 
-**Final model:** `models/ppo_500k_v3_merge.zip` — crash=0%, speed=18.67 m/s, reward=261.44.
+**Final model: `models/ppo_500k_v2_merge.zip`**
 
-**Results are final.** The agent successfully merges in every episode (0% crash rate, highway
-speed maintained). The success metric for this project is crash-free merging at highway speed —
-both are achieved.
+Diagnostic (`src/diagnose_v3.py`, 20 deterministic episodes, seeds 0–19):
+- **Merge complete (max_x > 310m): 18/20 = 90%**
+- Crashed: 0/20
+- Typical episode length: 28–35 steps (finishes well before 150-step limit)
+- Typical max_x: 330–337m
 
-A note on `mean_steps=150.0` in eval: all 50 episodes hit the 150-step budget rather than
-triggering an explicit `terminated=True`. This does **not** mean the merge failed. The road
-geometry is: approach (0–230m) → merge zone (230–310m) → highway (310–460m). The agent clears
-the merge zone in every episode and is driving on the highway post-merge — the step budget simply
-expires while it is already on the highway. "Completing the merge" in the task sense (joining the
-highway without crashing) is happening every time.
+**Why v2 and not v3:** v3 was retrained with the x>330 termination override and that disrupted
+learning — the v3 policy stalls at x≈182–297m (0/20 crossing x>310). v2 learned to reach x>330
+anyway via milestones and truncation reward without the explicit termination signal. Running v2
+weights with the current code (which has the x>330 override) works correctly: the override fires
+naturally as the policy crosses 330m, terminating the episode cleanly.
 
-The x>330 termination override was an engineering fix for highway-env's broken threshold
-(x>370 is geometrically unreachable due to road curvature) and is not a project success
-criterion.
+The two anomalous episodes (ep13: max_x=280m, ep16: max_x=295m) hit the 150-step limit due to
+dense-traffic spawns that forced the policy to yield longer than usual. 18/20 = 90% is the
+paper number.
 
 **Code is on the `shanu` branch** — all changes committed and pushed.
 
 ---
 
-## Next Steps (Phase 8)
+## Next Steps (Phases 8–9)
 
-1. Plot training curve from v2 checkpoints (100k–500k) → presentation figure
-2. Cross-eval: MPC / BC / PPO on the same 50-episode eval set (coordinate with Nathan)
-3. Final paper numbers should use `ppo_500k_v3_merge.zip` for the PPO agent
-
----
-
-## Open Question for Codex — x > 310 Termination and Whether v4 Is Needed
-
-**If the paper reports crash rate and speed as the primary metrics, v3 results are final.**
-0% crash + 18.67 m/s across 50 episodes is a complete result. The agent merges successfully
-every episode — the 150-step post-merge driving is just bookkeeping noise, not outcome noise.
-
-**A v4 rerun would only be needed if the paper needs to report a merge completion rate**
-(i.e., "X% of episodes terminated successfully") as a named metric. If so, the fix is one line
-in `src/rl_finetune.py`:
-```python
-# current — threshold is 20m past the merge zone exit
-if x > 330.0 and not crashed:
-# change to — terminate exactly at merge zone exit
-if x > 310.0 and not crashed:
-```
-This would make every successful merge end with `terminated=True` and give a clean completion
-rate metric. It would require a rerun since the value function was trained on x>330.
-
-**Please review `src/rl_finetune.py` and the v3 results above** — does the paper need a
-completion rate metric, or are crash rate + speed sufficient?
-
+1. Phase 8: `src/baseline.py` — independent MPC baseline (no multi-agent awareness)
+2. Phase 9: `src/evaluate.py` — 20 eps x 3 scenarios x 2 methods, bar charts + training curve
+3. Final paper numbers should use `ppo_500k_v2_merge.zip` for the PPO agent
 ---
 
 ## Branch Status
