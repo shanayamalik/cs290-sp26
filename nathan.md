@@ -4,13 +4,6 @@
 
 ---
 
-## What Was Done (Phase 7: PPO Fine-Tuning from BC Warm Start)
-
-Starting from Codex's `src/rl_finetune.py` (Nathan's commit `ad89ef4`), Shanaya ran a full
-debugging and training session. Here is everything that was changed and why, in order.
-
----
-
 ## Bug Fixes to `src/rl_finetune.py`
 
 ### 1. BC model path
@@ -102,44 +95,50 @@ as primary metrics in the paper.
 
 ---
 
-## Open Questions / Next Steps for Codex
+## Status — Results Not Final, Rerun in Progress
 
-1. **`terminated` never fires — root cause confirmed.** `MergeEnv._is_terminated()` source:
-   ```python
-   def _is_terminated(self):
-       return self.vehicle.crashed or bool(self.vehicle.position[0] > 370)
-   def _is_truncated(self):
-       return False
-   ```
-   The road's sine-lane geometry means `position[0]` peaks at ~333–343m and then decreases as
-   the vehicle follows the curve — the 370m threshold is geometrically unreachable in our config.
-   **Proposed fix (not yet implemented):** override in `MergePPOWrapper.step()`:
-   ```python
-   if x > 330.0 and not crashed:
-       terminated = True
-       reward += 20.0  # completion bonus
-   ```
-   This needs a 500k rerun. Expected to be the last fix needed to get completion events.
+The 500k v2 results above (crash=0%, speed=20.22 m/s, reward=250.86) are real but **not the
+final numbers** — we are rerunning at 500k again (v3) with one more fix before locking results.
 
-2. **Phase 8 — independent 2-agent baseline (most important missing piece for the paper).**
-   We do not yet have the MPC/independent planner baseline implemented. The paper needs a
-   3×4 table (method × traffic mix) comparing MPC, BC, and PPO on crash rate, mean speed,
-   and mean reward across all 4 traffic mixes, each evaluated on 50 seeds. BC eval can run
-   from `src/cross_eval_bc.py`; PPO eval is in `rl_finetune.py`; MPC baseline needs a
-   dedicated eval script.
+**Why we're rerunning:**
 
-3. **Immediate priority order (Claude Opus recommendation):**
-   1. Implement x > 330 completion fix and rerun 500k → get merge completion events
-   2. Plot training curve from 5 checkpoints (100k–500k) → presentation figure
-   3. Run unified 3-method × 4-traffic-mix cross-eval → paper results table
+We discovered that `MergeEnv._is_terminated()` checks `position[0] > 370`, but the road's
+sine-lane geometry causes `position[0]` to peak at ~333–343m and then *decrease* as the vehicle
+follows the curve. The 370m threshold is geometrically unreachable — the `+20` completion reward
+and the `terminated=True` branch have **never fired in any of our training runs.**
+
+We are overriding the termination condition in `MergePPOWrapper.step()` with a reachable
+threshold based on our diagnostic data:
+```python
+if x > 330.0 and not crashed:
+    terminated = True
+    reward += 20.0  # completion bonus
+```
+
+**Why 500k again (not 100k):** the 500k v2 run showed PPO needs the full budget to consistently
+reach x ≈ 340m. At 100k the policy was still exploring and didn't reliably make it that far.
+500k gives the value function enough updates to make the completion bonus actually useful as a
+learning signal.
+
+The v3 run (~90 min) will be the first run where PPO can actually learn to complete the merge.
+We'll update this file with results once it finishes.
+
+**Code is on the `shanu` branch** — all changes committed and pushed. Nathan can see the full
+diff and the current `src/rl_finetune.py` there.
+
+---
+
+## After v3 Completes — Shanaya Will
+
+1. Update this file with v3 eval results (50 episodes)
+2. Plot training curve from v2 checkpoints (100k–500k) → presentation figure
+3. Coordinate with Nathan on Phase 8 (MPC/BC/PPO cross-eval) once v3 results are in
 
 ---
 
 ## Branch Status
 
-- Branch: `shanu` (6 commits ahead of `main`)
-- All code changes committed, pushed to `origin/shanu`
-- Model `.zip` files gitignored (stored locally only)
-
----
+- Branch: `shanu` (pushed to `origin/shanu`)
+- All code committed and pushed — Nathan can view on GitHub
+- Model `.zip` files are gitignored (large binaries, stored locally only)
 
