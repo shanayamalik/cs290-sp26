@@ -43,7 +43,7 @@ ENV_CONFIG = {
 }
 
 MAX_STEPS = 50
-DEFAULT_BC_MODEL = Path("models/bc_policy_all.pt")
+DEFAULT_BC_MODEL = Path("models/bc_policy_default_mix.pt")
 
 
 class MergePPOWrapper(gym.Wrapper):
@@ -62,7 +62,7 @@ class MergePPOWrapper(gym.Wrapper):
         self.total_clamp_count = 0
         self.total_action_count = 0
         self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(27,), dtype=np.float32
+            low=-np.inf, high=np.inf, shape=(28,), dtype=np.float32
         )
 
     def reset(self, **kwargs):
@@ -133,7 +133,7 @@ class MergePPOWrapper(gym.Wrapper):
         d_min = float(min(
             np.linalg.norm(ego.position - v.position) for v in others
         )) if others else 100.0
-        obs_aug = np.append(obs.reshape(-1), [d_min, float(self.step_count)]).astype(np.float32)
+        obs_aug = np.append(obs.reshape(-1), [d_min, float(self.step_count), float(ego.speed)]).astype(np.float32)
         obs_norm = (obs_aug - self.obs_mean) / self.obs_std
         return np.clip(obs_norm, -10.0, 10.0).astype(np.float32)
 
