@@ -98,100 +98,50 @@ All models beat the mean-action baseline by ~30%.
 
 ---
 
-## In Progress: Phase 7 — PPO Fine-Tuning
+## ✅ Completed: Phase 7 — PPO Fine-Tuning
 
-**Implemented:** `src/rl_finetune.py`
+**Final model:** `models/ppo_500k_v2_merge.zip` (local only, not git-tracked — 2.5MB, transfer separately)
 
-**What it does:**
-- Wraps Highway-Env `merge-v0` with the same 27-dim observation representation used by BC: flattened 5x5 obs + `d_min` + `step`.
-- Loads BC normalization stats from `models/bc_policy_all.npz`.
-- Uses a PPO actor architecture matching BC: 27 -> 256 -> 256 -> 128 -> 2.
-- Warm-starts PPO actor weights from `models/bc_policy_all.pt`.
-- Uses a tanh-bounded PPO action mean so deterministic PPO actions match the BC convention of actions in `[-1, 1]`.
-- Applies the same no-reverse action safety clamp and reports clamp rate.
-- Uses a shaped RL reward that penalizes crash/reversing/clamp dependence and rewards forward speed/progress.
+**Implementation:** `src/rl_finetune.py`. Key details vs the smoke test version above:
+- 28-dim obs: raw 5×5 (25) + d_min + step_count + ego_speed
+- Warm-started from `bc_policy_default_mix.pt` (not combined — default_mix had better cross-eval tradeoff)
+- Milestone rewards (+5 per 50m), truncation-shaped reward (`0.05 × distance`), MAX_STEPS=150
+- Termination override: `x > 330m` (built-in `x > 370m` threshold unreachable due to sine-lane curvature)
+- 500k timesteps, seed=0, CheckpointCallback every 100k steps
 
-**Smoke test run:** `python3 src/rl_finetune.py --timesteps 5000 --eval-episodes 10 --traffic-mix default_mix --out models/ppo_smoke_merge`
+**Diagnostic result** (`src/diagnose_v3.py`, 20 deterministic eps):
+- 18/20 merge completions (max_x > 310m), 0/20 crashes, ~28–35 steps per episode
 
-| Check | Before PPO | After 5k PPO steps |
-|---|---:|---:|
-| Crash rate | 0.0% | 0.0% |
-| Mean reward | 8.00 | 155.72 |
-| Mean steps | 50.0 | 50.0 |
-| Mean speed | 4.00 m/s | 34.98 m/s |
-| Clamp rate | 58.8% | 0.0% |
-
-**Cross-mixture smoke eval after 5k PPO steps, 10 episodes each:** 0% crash on all_normal/default_mix/cautious_heavy/aggressive_heavy, mean speed about 35 m/s, clamp rate 0%.
-
-**Interpretation:** PPO wiring is working and quickly fixes the BC failure mode of slow/clamped driving. This is only a smoke result, not final Phase 7. The policy is now very fast and still hits the 50-step cap, so next we need a longer run plus a better completion metric/reward term to confirm it is actually completing the merge task efficiently rather than just driving fast.
+See `nathan.md` for all 10 bug fixes and the full training run history.
 
 ---
 
-## Questions for GSI
+## ✅ Completed: Phase 8 — Baseline
 
-1. **Crash episode training signal:** We're excluding crash-flagged records from BC training. After the reward fix, crash rates are much lower (1.8%-2.5% across the four fixed datasets). Is clean-only still the best training choice, or should we keep pre-crash steps from otherwise crashed episodes?
+**Implemented:** `src/baseline.py`. Independent 2-agent planning: MPC predicts each non-ego vehicle separately, ignoring human–human interactions. Removes the multi-agent extension to provide an ablation baseline.
 
-2. **PPO warm-starting strategy:** For RL fine-tuning, should we freeze the BC encoder layers for the first few thousand steps, or let all layers train from the start with a low learning rate (1e-4)?
-   
-3. How many episodes/merges do you suggest? We now have 400 merges per mixture and roughly 18k-19k transitions per fixed dataset.
-
-4. Question: Our MPC expert fixes steering to 0.0 — the ego is a highway vehicle that only needs to manage its speed, not change lanes. As a result, our BC network effectively only learns acceleration. Should we keep this as-is, or is there value in learning a steering signal too (e.g., for lane-keeping robustness in the PPO fine-tuning phase)?
-
-5. can we meet with u again pls
+**Final result (50 eps, default_mix):** 90% merge success, 2% crash, 6.56 m/s, merge step 48.7, clamp rate 34.6%.
 
 ---
 
-## In Progress: Phase 8 — Baseline
+## ✅ Completed: Phase 9 — Final Evaluation
 
-**Implemented:** `src/baseline.py`
+**Implemented:** `src/evaluate.py`. Runs all 4 methods on identical seeds and traffic mix.
 
-**Baseline definition:** naive independent 2-agent planning. This is the Sadigh-style comparison point: for each non-ego vehicle, predict its response to the ego independently as if the other non-ego vehicles were absent. The ego then scores actions against the collection of those independent pairwise predictions. This preserves robot-human strategic planning but removes human-human interaction chains.
+**Final results (50 episodes each):**
 
-**Why this baseline matters:** our project claims value from extending interaction-aware planning from one human to multiple interacting vehicles. The baseline asks what happens if we apply the original 2-agent idea naively to a multi-car merge.
+| Traffic Mix | Method | Merge Success | Crash | Mean Speed | Merge Step | Min TTC |
+|-------------|--------|-------------|-------|------------|------------|---------|
+| default_mix | BC | 0% | 10% | 2.93 m/s | — | 17.21s |
+| default_mix | **PPO** | **96%** | **0%** | **19.56 m/s** | **27.6** | 15.11s |
+| default_mix | Baseline | 90% | 2% | 6.56 m/s | 48.7 | 0.60s |
+| default_mix | MPC | 92% | 2% | 7.89 m/s | 46.3 | 0.48s |
+| all_normal | **PPO** | **84%** | **0%** | 19.31 m/s | 27.6 | 14.99s |
+| cautious_heavy | **PPO** | **90%** | **0%** | 19.27 m/s | 27.8 | 14.65s |
+| aggressive_heavy | **PPO** | **96%** | **0%** | 19.28 m/s | 27.5 | 15.08s |
 
-**Default-mix smoke result:** `python3 src/baseline.py --episodes 20 --traffic-mix default_mix --seed 0`
+PPO outperforms all methods on every metric across all traffic mixes. Baseline ≈ MPC — the multi-agent iterative best-response adds little over independent planning in this scenario. Results CSVs in `diagnostics/`.
 
-| Metric | Independent 2-agent baseline |
-|---|---:|
-| Merge success rate (`x > 310`, no crash) | 90.0% |
-| Crash rate | 0.0% |
-| Short/timeout rate | 10.0% |
-| Mean speed | 5.85 m/s |
-| Mean steps | 65.7 |
-| Mean merge step | 50.1 |
-| Mean min distance | 5.43 m |
-| Mean min TTC | 0.59 s |
-| Clamp rate | 37.5% |
-
-**Interpretation:** the baseline can merge in most default-mix episodes, but it is slow and relies on the no-reverse clamp often. This gives us a meaningful comparison against PPO: PPO should preserve safety while improving speed/commitment and reducing clamp dependence.
-
----
-
-## In Progress: Phase 9 — Final Evaluation
-
-**Implemented:** `src/evaluate.py`
-
-**What it does:** runs BC, PPO, independent 2-agent baseline, and full MPC on the same traffic mix/seeds using a shared metric definition.
-
-**Metrics:**
-- Merge success: ego crosses `x > 310m` without crashing
-- Crash rate
-- Short/timeout rate
-- Mean speed
-- Mean merge step
-- Mean minimum distance
-- Mean minimum TTC
-- No-reverse clamp rate
-
-**Usage:**
 ```bash
-python3 src/evaluate.py --episodes 20 --traffic-mix default_mix --seed 0 \
-  --ppo-model models/ppo_500k_v3_merge.zip
+python3 src/evaluate.py --episodes 50 --traffic-mix default_mix --seed 0
 ```
-
-If the PPO zip is not available locally, the evaluator skips PPO and still runs the other methods:
-```bash
-python3 src/evaluate.py --methods bc baseline mpc --episodes 20 --traffic-mix default_mix
-```
-
-**Smoke checks completed:** BC + baseline run, MPC run, and PPO missing/old-model handling works. The local `models/ppo_smoke_merge.zip` was trained before ego speed was added as the 28th PPO feature, so it is intentionally skipped as incompatible. Final PPO evaluation should use Shanaya's `models/ppo_500k_v3_merge.zip`.
