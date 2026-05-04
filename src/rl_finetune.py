@@ -27,6 +27,7 @@ import numpy as np
 import torch
 from gymnasium import spaces
 from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.policies import ActorCriticPolicy
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -40,10 +41,11 @@ ENV_CONFIG = {
     "vehicles_count": 3,
     "controlled_vehicles": 1,
     "action": {"type": "ContinuousAction"},
+    "speed_limit": 25,
 }
 
-MAX_STEPS = 50
-DEFAULT_BC_MODEL = Path("models/bc_policy_all.pt")
+MAX_STEPS = 150
+DEFAULT_BC_MODEL = Path("models/bc_policy_default_mix.pt")
 
 
 class MergePPOWrapper(gym.Wrapper):
@@ -59,10 +61,13 @@ class MergePPOWrapper(gym.Wrapper):
         self.max_steps = MAX_STEPS
         self.step_count = 0
         self.prev_x = 0.0
+        self.spawn_x = 0.0
+        self.milestones_hit: set = set()
+        self.milestone_spacing = 50.0  # meters between milestone bonuses
         self.total_clamp_count = 0
         self.total_action_count = 0
         self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(27,), dtype=np.float32
+            low=-np.inf, high=np.inf, shape=(28,), dtype=np.float32
         )
 
     def reset(self, **kwargs):
@@ -71,6 +76,8 @@ class MergePPOWrapper(gym.Wrapper):
             self.rng.choice(self.driver_fns)(vehicle)
         self.step_count = 0
         self.prev_x = float(self.env.unwrapped.road.vehicles[0].position[0])
+        self.spawn_x = self.prev_x
+        self.milestones_hit = set()
         return self._augment_obs(obs), info
 
     def step(self, action):
@@ -97,8 +104,13 @@ class MergePPOWrapper(gym.Wrapper):
         self.prev_x = x
 
         crashed = bool(self.env.unwrapped.vehicle.crashed)
-        reward = self._rl_reward(float(env_reward), speed, dx, crashed, terminated, speed_clamped)
-        truncated = truncated or self.step_count >= self.max_steps
+        # Override highway-env's unreachable termination threshold (x > 370).
+        # Road curves mean position[0] peaks at ~333-343m then decreases, so
+        # the built-in condition never fires. Use x > 330 instead.
+        if x > 330.0 and not crashed:
+            terminated = True
+        truncated = (not terminated) and (truncated or self.step_count >= self.max_steps)
+        reward = self._rl_reward(float(env_reward), speed, dx, x, crashed, terminated, truncated, speed_clamped)
         info = dict(info)
         info.update({
             "ego_speed": speed,
@@ -108,23 +120,38 @@ class MergePPOWrapper(gym.Wrapper):
         })
         return self._augment_obs(obs), reward, terminated, truncated, info
 
-    def _rl_reward(self, env_reward: float, speed: float, dx: float,
-                   crashed: bool, terminated: bool, speed_clamped: bool) -> float:
+    def _rl_reward(self, env_reward: float, speed: float, dx: float, x: float,
+                   crashed: bool, terminated: bool, truncated: bool,
+                   speed_clamped: bool) -> float:
         if crashed:
             return -100.0
 
         # Encourage forward commitment while keeping the signal small enough
         # that PPO still respects highway-env's built-in merge reward.
         reward = env_reward
-        reward += 0.08 * min(max(speed, 0.0), 25.0)
+        reward += 0.04 * min(max(speed, 0.0), 20.0)
         reward += 0.03 * max(dx, 0.0)
         reward -= 0.05
+        if speed > 20.0:
+            reward -= 0.15 * (speed - 20.0)
         if speed < 0.5:
             reward -= 0.5
         if speed_clamped:
             reward -= 1.0
         if terminated:
             reward += 20.0
+        # Shaped truncation reward: encourage reaching further even without
+        # completing the road. Fires only when step limit is hit (not on crash
+        # or road-end termination).
+        if truncated and not terminated:
+            reward += 0.05 * max(x - self.spawn_x, 0.0)
+        # Dense progress bonus: +5 each time ego crosses a new 50m milestone.
+        # Only fires once per milestone per episode — cannot be farmed by
+        # driving back and forth.
+        milestone_idx = int(x // self.milestone_spacing)
+        if milestone_idx > 0 and milestone_idx not in self.milestones_hit:
+            self.milestones_hit.add(milestone_idx)
+            reward += 5.0
         return float(reward)
 
     def _augment_obs(self, obs) -> np.ndarray:
@@ -133,7 +160,7 @@ class MergePPOWrapper(gym.Wrapper):
         d_min = float(min(
             np.linalg.norm(ego.position - v.position) for v in others
         )) if others else 100.0
-        obs_aug = np.append(obs.reshape(-1), [d_min, float(self.step_count)]).astype(np.float32)
+        obs_aug = np.append(obs.reshape(-1), [d_min, float(self.step_count), float(ego.speed)]).astype(np.float32)
         obs_norm = (obs_aug - self.obs_mean) / self.obs_std
         return np.clip(obs_norm, -10.0, 10.0).astype(np.float32)
 
@@ -164,7 +191,14 @@ def load_bc_stats(bc_model: Path) -> tuple[np.ndarray, np.ndarray]:
     if not stats_path.exists():
         raise FileNotFoundError(f"Missing BC normalization stats: {stats_path}")
     stats = np.load(stats_path)
-    return stats["mean"], stats["std"]
+    mean = stats["mean"]
+    std = stats["std"]
+    # BC was trained on 27-dim obs. PPO adds ego_speed as 28th feature.
+    # Pad with mean=0, std=1 so ego_speed passes through unnormalized.
+    if len(mean) == 27:
+        mean = np.append(mean, 0.0)
+        std = np.append(std, 1.0)
+    return mean, std
 
 
 def warm_start_actor(ppo: PPO, bc_model_path: Path) -> bool:
@@ -182,7 +216,15 @@ def warm_start_actor(ppo: PPO, bc_model_path: Path) -> bool:
     ppo_linears = [policy_net[0], policy_net[2], policy_net[4], ppo.policy.action_net]
 
     with torch.no_grad():
-        for src, dst in zip(bc_linears, ppo_linears):
+        # First layer: BC expects 27 inputs, PPO now expects 28.
+        # Copy BC weights for the first 27 columns; zero the 28th (ego_speed)
+        # so the network starts behaving identically to BC.
+        src = bc_linears[0]
+        dst = ppo_linears[0]
+        dst.weight[:, :27].copy_(src.weight)
+        dst.weight[:, 27:].zero_()
+        dst.bias.copy_(src.bias)
+        for src, dst in zip(bc_linears[1:], ppo_linears[1:]):
             dst.weight.copy_(src.weight)
             dst.bias.copy_(src.bias)
         ppo.policy.log_std.fill_(-1.0)
@@ -292,9 +334,15 @@ def main():
     print_eval("Before PPO fine-tuning", before)
 
     print(f"\nTraining PPO for {args.timesteps} timesteps...")
-    model.learn(total_timesteps=args.timesteps, progress_bar=False)
-
     out_path = Path(args.out)
+    checkpoint_cb = CheckpointCallback(
+        save_freq=100_000,
+        save_path=str(out_path.parent),
+        name_prefix=out_path.name,
+        verbose=1,
+    )
+    model.learn(total_timesteps=args.timesteps, callback=checkpoint_cb, progress_bar=True)
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
     model.save(out_path)
     print(f"\nSaved PPO model to {out_path}.zip")

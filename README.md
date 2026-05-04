@@ -8,9 +8,9 @@ Extension of Sadigh et al. (2016) to multi-vehicle lane merging with 3+ agents. 
 
 Driver type parameters (in `src/driver_types.py`) are hand-tuned based on empirically observed ranges from Treiber et al. (2000) and map onto the Social Value Orientation taxonomy from Schwarting et al. (2019). They are not learned from data.
 
-**Progress:** Phases 1–6 complete (environment setup, driver types, reward functions, MPC expert, expert dataset generation, behavioral cloning). Phase 7 PPO fine-tuning in progress.
+**Progress:** Phases 1–9 complete. Pipeline: MPC expert → behavioral cloning → PPO fine-tuning → baseline comparison → final evaluation.
 See [implementation_guide.md](implementation_guide.md) for the full step-by-step implementation plan.
-See [report_notes.md](report_notes.md) for things to address in the final paper writeup.
+See [nathan.md](nathan.md) for Phase 7 details and handoff notes.
 
 ---
 
@@ -139,3 +139,41 @@ Model MSE on validation set (all beat mean-action baseline by ~30%):
 | aggressive_heavy | 72% crash, R=10.5, v=22.5 | 46% crash, R=19.2, v=17.0 | 62% crash, R=13.8, v=20.3 | 52% crash, R=17.2, v=18.3 |
 
 All crashes verified as spawn collisions at step ≤ 3. Zero policy-induced crashes. `default_mix` model chosen as PPO warm-start (best crash/speed tradeoff). See `nathan.md` for full bug diagnosis and fix details.
+
+## Reproducing Phase 7 results (PPO fine-tuning)
+
+Final model: `models/ppo_500k_v2_merge.zip` (not tracked by git — transfer separately).
+
+```bash
+# Train from scratch (90 min on Apple M2)
+python3 src/rl_finetune.py --timesteps 500000 --eval-episodes 50 --traffic-mix default_mix --out models/ppo_500k_v2_merge
+
+# Verify final model (should print 18/20 MERGE OK)
+python3 src/diagnose_v3.py models/ppo_500k_v2_merge.zip
+```
+
+## Reproducing Phase 8–9 results (baseline + final evaluation)
+
+```bash
+# Run baseline standalone (independent 2-agent MPC)
+python3 src/baseline.py --episodes 50 --traffic-mix default_mix --seed 0
+
+# Run full 4-method evaluation on one traffic mix
+python3 src/evaluate.py --episodes 50 --traffic-mix default_mix --seed 0
+
+# Run all 4 traffic mixes
+for mix in default_mix all_normal cautious_heavy aggressive_heavy; do
+  python3 src/evaluate.py --episodes 50 --traffic-mix $mix --seed 0 --output diagnostics/final_eval_${mix}.csv
+done
+```
+
+**Final results (50 episodes, default_mix):**
+
+| Method | Merge Success | Crash | Mean Speed | Merge Step | Min TTC |
+|--------|-------------|-------|------------|------------|--------|
+| BC | 0% | 10% | 2.93 m/s | — | 17.21s |
+| PPO (ours) | **96%** | **0%** | **19.56 m/s** | **27.6** | 15.11s |
+| Baseline (indep. MPC) | 90% | 2% | 6.56 m/s | 48.7 | 0.60s |
+| Full MPC | 92% | 2% | 7.89 m/s | 46.3 | 0.48s |
+
+Results CSVs saved to `diagnostics/`.

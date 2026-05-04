@@ -127,17 +127,27 @@ python3 src/cross_eval_bc.py --episodes 50
 
 ---
 
-## Phase 7: RL Fine-Tuning
-**Goal:** Fine-tune the BC-initialised policy with PPO to learn when to commit to the merge.
+## ✅ Phase 7: RL Fine-Tuning — COMPLETE
 
-**Warm-start:** `models/bc_policy_all.pt` + `models/bc_policy_all.npz`. Plan: train all layers from the start with lr=1e-4 (no frozen layers). Treat spawn crashes (step ≤ 3) as normal terminal states — no masking needed, PPO handles early termination fine. The combined BC model is preferred because cross-eval after clamp logging showed it is more robust across all traffic mixtures than the single-mixture models.
+**Final model:** `models/ppo_500k_v2_merge.zip` (local only, not git-tracked)
 
-### Fine-tune with PPO
+**Key implementation details** (see `src/rl_finetune.py` and `nathan.md` for full bug list):
+- 28-dim obs: raw 5×5 highway-env obs (25) + d_min + step_count + ego_speed
+- Warm-started from `bc_policy_default_mix.pt`
+- Milestone rewards (+5 every 50m), truncation-shaped reward, MAX_STEPS=150
+- Termination override: `x > 330m` (built-in `x > 370m` threshold is geometrically unreachable due to road curvature)
+- 500k timesteps, lr=1e-4, PPO with TanhMean policy
 
-Implemented in `src/rl_finetune.py`:
+**Results (50-ep eval, `diagnose_v3.py`, deterministic):**
+- 18/20 merge completions (x > 310m), 0/20 crashes, ~28–35 steps per episode
 
 ```bash
-python3 src/rl_finetune.py --timesteps 5000 --eval-episodes 10 --traffic-mix default_mix
+# Reproduce training (~90 min on Apple M2)
+python3 src/rl_finetune.py --timesteps 500000 --eval-episodes 50 --traffic-mix default_mix --out models/ppo_500k_v2_merge
+
+# Verify final model
+python3 src/diagnose_v3.py models/ppo_500k_v2_merge.zip
+```
 python3 src/rl_finetune.py --timesteps 100000 --eval-episodes 50 --traffic-mix default_mix --out models/ppo_finetuned_merge
 ```
 
@@ -147,11 +157,42 @@ python3 src/rl_finetune.py --timesteps 100000 --eval-episodes 50 --traffic-mix d
 
 ---
 
-## Phase 8: Baseline
+## ✅ Phase 8: Baseline — COMPLETE
 
-Create `baseline.py`. The baseline is independent 2-agent planning: the MPC plans separately for each human driver as if no other humans exist (i.e., `predict_other_responses` sees only one non-ego vehicle at a time). Re-run the same evaluation scenarios with this baseline and compare metrics.
+Implemented in `src/baseline.py`. Independent 2-agent planning: MPC plans separately for each non-ego vehicle as if the other non-ego vehicles don't exist (no human–human interaction chains). Isolates the value of the multi-agent extension.
+
+```bash
+python3 src/baseline.py --episodes 50 --traffic-mix default_mix --seed 0
+```
+
+Default-mix result (50 eps): 90% merge success, 2% crash, mean speed 6.56 m/s, mean merge step 48.7, clamp rate 34.6%.
 
 ---
+
+## ✅ Phase 9: Evaluation — COMPLETE
+
+Implemented in `src/evaluate.py`. Runs BC, PPO, baseline, and MPC on the same seeds and traffic mix.
+
+```bash
+# Single mix
+python3 src/evaluate.py --episodes 50 --traffic-mix default_mix --seed 0
+
+# All 4 mixes
+for mix in default_mix all_normal cautious_heavy aggressive_heavy; do
+  python3 src/evaluate.py --episodes 50 --traffic-mix $mix --seed 0 --output diagnostics/final_eval_${mix}.csv
+done
+```
+
+**Final results across traffic mixes (PPO merge success / crash rate):**
+
+| Traffic Mix | BC | PPO | Baseline | MPC |
+|-------------|-----|-----|----------|-----|
+| default_mix | 0% / 10% | **96% / 0%** | 90% / 2% | 92% / 2% |
+| all_normal | 0% / 8% | **84% / 0%** | 78% / 6% | 78% / 2% |
+| cautious_heavy | 0% / 8% | **90% / 0%** | 86% / 6% | 86% / 2% |
+| aggressive_heavy | 0% / 10% | **96% / 0%** | 90% / 0% | 92% / 0% |
+
+Results CSVs saved to `diagnostics/`. PPO outperforms all methods across all mixes.
 
 ## Phase 9: Evaluation
 
@@ -168,7 +209,20 @@ Run 20 episodes per scenario. Record for each episode:
 | Human-Mixed AV | RL policy | 1 human IDM + 1 additional RL policy vehicle |
 | Multi-AV | RL policy | 2 additional RL policy vehicles (no humans) |
 
-Create `evaluate.py` with a function that accepts a scenario config and runs N episodes, returning the three metrics. Compare Our Method vs. Baseline in a table.
+Implemented in `src/evaluate.py`. It runs BC, PPO, independent 2-agent baseline, and full MPC on the same seeds/traffic mix, then writes a summary table/CSV.
+
+```bash
+python3 src/evaluate.py --episodes 20 --traffic-mix default_mix --seed 0 \
+  --ppo-model models/ppo_500k_v3_merge.zip
+```
+
+If the final PPO zip is not local, run the non-PPO methods while waiting for the file:
+
+```bash
+python3 src/evaluate.py --methods bc baseline mpc --episodes 20 --traffic-mix default_mix
+```
+
+The evaluator skips missing or incompatible PPO model files with a clear message. The old local `ppo_smoke_merge.zip` used the pre-ego-speed 27-dim wrapper, while the final v3 PPO model uses the 28-dim wrapper.
 
 ### Plots to generate for the paper
 - Bar charts: merge success rate and avg completion time across 3 scenarios × 2 methods
@@ -208,8 +262,7 @@ Create `evaluate.py` with a function that accepts a scenario config and runs N e
 |---|---|
 | Apr 26 – Apr 28 | Phase 1–2: Environment + driver types running |
 | Apr 29 – May 1 | Phase 3–4: Reward functions + MPC expert working |
-| May 2 – May 4 | Phase 5: Expert dataset generated, trajectory plots ready |
-| May 5 – May 7 | Phase 6–7: Behavioral cloning + RL fine-tuning started |
-| **May 8** | **Presentation — need: problem statement, MPC results, BC results, RL in progress** |
-| May 9 – May 11 | Phase 8–9: Baseline + evaluation complete |
-| May 12 – May 15 | Phase 10: Paper writeup |
+| May 2 – May 4 | Phase 5–7: Expert dataset, BC, PPO fine-tuning complete |
+| May 4 – May 4 | Phase 8–9: Baseline + final evaluation complete |
+| **May 8** | **Presentation** |
+| May 9 – May 15 | Phase 10: Paper writeup |
