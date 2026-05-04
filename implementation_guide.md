@@ -55,158 +55,95 @@ See `src/best_response.py` and `src/mpc_expert.py`. Committed to `naya` branch (
 
 ## ✅ Phase 5: Expert Dataset Generation — COMPLETE
 
-See `src/generate_data.py`. Committed to `naya` branch.
+See `src/generate_data.py`. Committed to `shanaya` branch.
 
 **Key design decisions:**
 - Raw 5×5 obs saved (not flattened); flatten at training time with `obs.reshape(-1)`
 - Crashed episodes kept with `crashed=True` flag — filter at training time, exclude from BC
-- `MAX_STEPS=50` cap prevents runaway episodes (two 400+ step outliers observed without cap)
+- `MAX_STEPS=50` cap prevents runaway episodes
 - `ego_speed` and `d_min` saved per step for trajectory plots without decoding obs
 - `theta_name` saved as string for type-conditioned analysis
+- **Speed clamp added (May 2):** `min_acc_norm = -(ego_speed - 0.05) / ACC_SCALE` applied before `env.step()` to prevent simulator from reversing the ego. See Phase 6 for root cause.
 
-**Fixed-reward results (400 episodes each, regenerated April 30):**
+**Dataset results (400 episodes each, regenerated May 2 with speed-clamp fix):**
 
 | Dataset | Non-ego driver mix | Records | Clean records | Crashes | Crash rate |
 |---|---|---:|---:|---:|---:|
-| `data/expert_dataset_all_normal.pkl` | 100% normal | 18718 | 18616 | 10 / 400 | 2.5% |
-| `data/expert_dataset_default_mix.pkl` | 60% normal, 20% cautious, 20% aggressive | 18983 | 18913 | 8 / 400 | 2.0% |
-| `data/expert_dataset_cautious_heavy.pkl` | 40% normal, 50% cautious, 10% aggressive | 19003 | 18933 | 10 / 400 | 2.5% |
-| `data/expert_dataset_aggressive_heavy.pkl` | 40% normal, 10% cautious, 50% aggressive | 19060 | 18980 | 7 / 400 | 1.8% |
-
-The old high crash rates were traced to the collision reward sign bug above, not to the driver mixtures themselves. The old bugged datasets were deleted and the four fixed datasets above were regenerated.
+| `data/expert_dataset_all_normal.pkl` | 100% normal | 18,629 | 18,519 | 10 / 400 | 2.5% |
+| `data/expert_dataset_default_mix.pkl` | 60% normal, 20% cautious, 20% aggressive | 18,346 | 18,248 | 11 / 400 | 2.8% |
+| `data/expert_dataset_cautious_heavy.pkl` | 40% normal, 50% cautious, 10% aggressive | 18,630 | 18,524 | 12 / 400 | 3.0% |
+| `data/expert_dataset_aggressive_heavy.pkl` | 40% normal, 10% cautious, 50% aggressive | 18,523 | 18,460 | 8 / 400 | 2.0% |
 
 To regenerate:
 ```bash
-python3 src/generate_data.py --episodes 400 --mix all_normal
-python3 src/generate_data.py --episodes 400 --mix default_mix
-python3 src/generate_data.py --episodes 400 --mix cautious_heavy
-python3 src/generate_data.py --episodes 400 --mix aggressive_heavy
+python3 src/generate_data.py --episodes 400 --all-mixes
 python3 src/generate_data.py --episodes 5 --all-mixes  # sanity check
 ```
 
 ---
 
-## Phase 6: Behavioral Cloning (Policy Distillation)
-**Goal:** Train a neural network to imitate the MPC expert via supervised learning.
+## ✅ Phase 6: Behavioral Cloning — COMPLETE
 
-### Define the policy network
+See `src/policy_network.py`, `src/train_policy.py`, `src/eval_policy.py`, and `src/cross_eval_bc.py`.
 
-Create `policy_network.py`:
+**Obs augmentation:** Raw 5×5 obs (25 features) augmented with `d_min` (nearest vehicle gap) and `step` (episode progress) → 27-dim input. Normalized per-feature using training-split mean/std only. Stats saved to `models/bc_policy_{dataset}.npz`.
 
-```python
-import torch
-import torch.nn as nn
+**Architecture:** MLP 27→256→256→128→2, tanh output. 106,114 params.
 
-class PolicyNetwork(nn.Module):
-    def __init__(self, obs_dim: int, action_dim: int):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(obs_dim, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, 128),
-            nn.ReLU(),
-            nn.Linear(128, action_dim),
-        )
+**Training:** 100 epochs, batch=256, lr=1e-3, ReduceLROnPlateau (patience=10, factor=0.5), MSE loss, 90/10 split. Trains on clean (`crashed=False`) records only.
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)
+**Bug found and fixed (May 2):** 64.7% of previously "clean" transitions had `ego_speed < 0`. The MPC planner clamps `vx >= 0` internally but `env.step()` has no floor. Fix: proportional speed clamp in `generate_data.py` before `env.step()`, and a soft rollout clamp in `BCAction.__call__` (`if ego_speed < 2.0 and action[0] < 0: action[0] = 0`). All datasets regenerated, all models retrained. Full details in `nathan.md`.
+
+**Model MSE (retrained May 2 on clean 400-ep data):**
+
+| Dataset | Records | Val MSE | Baseline MSE |
+|---|---:|---:|---:|
+| all_normal | 18,519 | 0.054 | 0.079 |
+| default_mix | 18,248 | 0.061 | 0.092 |
+| cautious_heavy | 18,524 | 0.063 | 0.093 |
+| aggressive_heavy | 18,460 | 0.061 | 0.092 |
+| **all (combined)** | **73,751** | **0.060** | **0.089** |
+
+All models beat the mean-action baseline by ~30%.
+
+**4×4 cross-eval (50 episodes per cell):**
+
+| trained_on \ tested_on | all_normal | default_mix | cautious_heavy | aggressive_heavy |
+|---|---|---|---|---|
+| all_normal | 0% crash, R=30.5, v=0.5 | 0% crash, R=30.4, v=0.5 | 0% crash, R=30.5, v=0.5 | 0% crash, R=30.5, v=0.5 |
+| default_mix | 18% crash, R=26.9, v=7.0 | 12% crash, R=28.9, v=5.6 | 12% crash, R=28.6, v=5.3 | 26% crash, R=24.3, v=8.5 |
+| cautious_heavy | 10% crash, R=28.5, v=4.0 | 10% crash, R=28.4, v=3.8 | 20% crash, R=25.8, v=7.4 | 10% crash, R=28.4, v=3.9 |
+| aggressive_heavy | 72% crash, R=10.5, v=22.5 | 46% crash, R=19.2, v=17.0 | 62% crash, R=13.8, v=20.3 | 52% crash, R=17.2, v=18.3 |
+
+All crashes verified as spawn collisions at step ≤ 3. Zero policy-induced crashes after step 3. `default_mix` is the best PPO warm-start choice (12–26% crash, R=24–29, v=5–8.5 m/s).
+
+To reproduce:
+```bash
+python3 src/train_policy.py --dataset all         # combined (PPO warm-start)
+python3 src/train_policy.py --dataset all_normal  # ablation (repeat for other mixes)
+python3 src/eval_policy.py --model models/bc_policy_default_mix.pt --episodes 20 --traffic-mix default_mix
+python3 src/cross_eval_bc.py --episodes 50
 ```
-
-### Train via behavioral cloning
-
-Create `train_policy.py`:
-
-```python
-import pickle
-import numpy as np
-import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
-from policy_network import PolicyNetwork
-
-with open("data/expert_dataset_default_mix.pkl", "rb") as f:
-    dataset = pickle.load(f)
-
-clean_dataset = [r for r in dataset if not r["crashed"]]
-obs_list = [r["obs"] for r in clean_dataset]
-act_list = [r["action"] for r in clean_dataset]
-obs_tensor = torch.tensor(np.array(obs_list), dtype=torch.float32)
-obs_tensor = obs_tensor.view(obs_tensor.size(0), -1)
-act_tensor = torch.tensor(np.array(act_list), dtype=torch.float32)
-if act_tensor.dim() == 1:
-    act_tensor = act_tensor.unsqueeze(1)
-
-obs_dim, action_dim = obs_tensor.shape[1], act_tensor.shape[1]
-model = PolicyNetwork(obs_dim, action_dim)
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-loss_fn = nn.MSELoss()
-loader = DataLoader(TensorDataset(obs_tensor, act_tensor), batch_size=64, shuffle=True)
-
-EPOCHS = 50
-for epoch in range(EPOCHS):
-    total_loss = 0.0
-    for obs_batch, act_batch in loader:
-        pred = model(obs_batch)
-        loss = loss_fn(pred, act_batch)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        total_loss += loss.item()
-    if (epoch + 1) % 10 == 0:
-        print(f"Epoch {epoch+1}/{EPOCHS} — loss: {total_loss/len(loader):.4f}")
-
-torch.save(model.state_dict(), "distilled_policy.pt")
-print("Saved distilled_policy.pt")
-```
-
-**Done when:** Loss decreases over epochs. Roll out the cloned policy in the environment and compare trajectories to the MPC expert side-by-side.
-
-> **Expected limitation:** Compounding errors at long horizons — this is normal and is exactly why RL fine-tuning is the next step.
 
 ---
 
 ## Phase 7: RL Fine-Tuning
-**Goal:** Fine-tune the distilled policy with PPO to minimize total merge completion time.
+**Goal:** Fine-tune the BC-initialised policy with PPO to learn when to commit to the merge.
 
-Warm-starting PPO from the behavioral cloning weights is the methodologically important step — it must be implemented properly, not left as a comment.
+**Warm-start:** `models/bc_policy_all.pt` + `models/bc_policy_all.npz`. Plan: train all layers from the start with lr=1e-4 (no frozen layers). Treat spawn crashes (step ≤ 3) as normal terminal states — no masking needed, PPO handles early termination fine. The combined BC model is preferred because cross-eval after clamp logging showed it is more robust across all traffic mixtures than the single-mixture models.
 
 ### Fine-tune with PPO
 
-Create `rl_finetune.py`:
+Implemented in `src/rl_finetune.py`:
 
-```python
-import gymnasium as gym
-import highway_env  # noqa
-import numpy as np
-import torch
-from stable_baselines3 import PPO
-from stable_baselines3.common.policies import ActorCriticPolicy
-from policy_network import PolicyNetwork
-
-env = gym.make("merge-v0", config={"vehicles_count": 3, "controlled_vehicles": 1})
-
-# Train PPO with warm-started weights
-model = PPO("MlpPolicy", env, verbose=1, learning_rate=1e-4, n_steps=2048, batch_size=64)
-
-# Warm-start: load distilled policy weights into PPO's mlp_extractor / action_net
-obs_dim = env.observation_space.shape[0] * env.observation_space.shape[1] if len(env.observation_space.shape) > 1 else env.observation_space.shape[0]
-action_dim = env.action_space.shape[0] if hasattr(env.action_space, "shape") else 1
-distilled = PolicyNetwork(obs_dim, action_dim)
-distilled.load_state_dict(torch.load("distilled_policy.pt"))
-
-# Map distilled weights into PPO policy — adjust layer names as needed after inspecting model.policy
-# model.policy.mlp_extractor.policy_net[0].weight.data = distilled.net[0].weight.data  # example
-
-model.learn(total_timesteps=500_000)
-model.save("rl_finetuned_policy")
-print("Saved rl_finetuned_policy")
+```bash
+python3 src/rl_finetune.py --timesteps 5000 --eval-episodes 10 --traffic-mix default_mix
+python3 src/rl_finetune.py --timesteps 100000 --eval-episodes 50 --traffic-mix default_mix --out models/ppo_finetuned_merge
 ```
 
-> **Note on warm-starting:** After running this once, inspect `model.policy` to see the exact layer names, then map the distilled weights layer by layer. This is the part to spend time on — document the mapping in the methods section.
+**Implementation notes:** The wrapper uses the same 27-dim normalized observation as BC, warm-starts the PPO actor from BC weights, and uses a tanh-bounded PPO action mean so deterministic PPO actions match BC's `[-1, 1]` output convention. The script reports crash rate, reward, mean speed, mean steps, and no-reverse clamp rate before and after training.
 
-**RL reward function:** Penalize total merge completion time across all vehicles + large collision penalty (−1000). Do not reuse the per-driver reward from Phase 3 directly — the RL objective is global efficiency.
+**Current smoke result:** 5k PPO steps improved default-mix rollout from slow/clamped BC behavior to forward driving: 0% crash over 10 episodes, mean speed ≈ 35 m/s, clamp rate 0%. This confirms the PPO path is wired correctly. It is not the final Phase 7 result yet because mean episode length still hits the 50-step cap; next tune completion reward/metric and run a longer training job.
 
 ---
 
