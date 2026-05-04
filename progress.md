@@ -164,3 +164,34 @@ All models beat the mean-action baseline by ~30%.
 | Clamp rate | 37.5% |
 
 **Interpretation:** the baseline can merge in most default-mix episodes, but it is slow and relies on the no-reverse clamp often. This gives us a meaningful comparison against PPO: PPO should preserve safety while improving speed/commitment and reducing clamp dependence.
+
+---
+
+## In Progress: Phase 9 — Final Evaluation
+
+**Implemented:** `src/evaluate.py`
+
+**What it does:** runs BC, PPO, independent 2-agent baseline, and full MPC on the same traffic mix/seeds using a shared metric definition.
+
+**Metrics:**
+- Merge success: ego crosses `x > 310m` without crashing
+- Crash rate
+- Short/timeout rate
+- Mean speed
+- Mean merge step
+- Mean minimum distance
+- Mean minimum TTC
+- No-reverse clamp rate
+
+**Usage:**
+```bash
+python3 src/evaluate.py --episodes 20 --traffic-mix default_mix --seed 0 \
+  --ppo-model models/ppo_500k_v3_merge.zip
+```
+
+If the PPO zip is not available locally, the evaluator skips PPO and still runs the other methods:
+```bash
+python3 src/evaluate.py --methods bc baseline mpc --episodes 20 --traffic-mix default_mix
+```
+
+**Smoke checks completed:** BC + baseline run, MPC run, and PPO missing/old-model handling works. The local `models/ppo_smoke_merge.zip` was trained before ego speed was added as the 28th PPO feature, so it is intentionally skipped as incompatible. Final PPO evaluation should use Shanaya's `models/ppo_500k_v3_merge.zip`.

@@ -174,7 +174,20 @@ Run 20 episodes per scenario. Record for each episode:
 | Human-Mixed AV | RL policy | 1 human IDM + 1 additional RL policy vehicle |
 | Multi-AV | RL policy | 2 additional RL policy vehicles (no humans) |
 
-Create `evaluate.py` with a function that accepts a scenario config and runs N episodes, returning the three metrics. Compare Our Method vs. Baseline in a table.
+Implemented in `src/evaluate.py`. It runs BC, PPO, independent 2-agent baseline, and full MPC on the same seeds/traffic mix, then writes a summary table/CSV.
+
+```bash
+python3 src/evaluate.py --episodes 20 --traffic-mix default_mix --seed 0 \
+  --ppo-model models/ppo_500k_v3_merge.zip
+```
+
+If the final PPO zip is not local, run the non-PPO methods while waiting for the file:
+
+```bash
+python3 src/evaluate.py --methods bc baseline mpc --episodes 20 --traffic-mix default_mix
+```
+
+The evaluator skips missing or incompatible PPO model files with a clear message. The old local `ppo_smoke_merge.zip` used the pre-ego-speed 27-dim wrapper, while the final v3 PPO model uses the 28-dim wrapper.
 
 ### Plots to generate for the paper
 - Bar charts: merge success rate and avg completion time across 3 scenarios × 2 methods
