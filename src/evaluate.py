@@ -24,6 +24,8 @@ import random
 import sys
 from pathlib import Path
 
+from tqdm import tqdm
+
 Path(".cache/matplotlib").mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("MPLCONFIGDIR", ".cache/matplotlib")
 
@@ -125,7 +127,7 @@ def evaluate_raw_method(method: str, episodes: int, traffic_mix: str, seed: int,
     else:
         raise ValueError(method)
 
-    for ep in range(episodes):
+    for ep in tqdm(range(episodes), desc=method, unit="ep"):
         np.random.seed(seed + ep)
         random.seed(seed + ep)
         obs, _ = env.reset(seed=seed + ep)
@@ -198,7 +200,7 @@ def evaluate_ppo(ppo_model: Path, ppo_bc_model: Path, episodes: int,
     env = make_env(obs_mean, obs_std, traffic_mix, seed)
     results = []
 
-    for ep in range(episodes):
+    for ep in tqdm(range(episodes), desc="ppo", unit="ep"):
         obs, _ = env.reset(seed=seed + ep)
         steps = 0
         total_reward = 0.0
