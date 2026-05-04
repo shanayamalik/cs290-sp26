@@ -40,6 +40,7 @@ ENV_CONFIG = {
     "vehicles_count": 3,
     "controlled_vehicles": 1,
     "action": {"type": "ContinuousAction"},
+    "speed_limit": 25,
 }
 
 MAX_STEPS = 50
@@ -116,9 +117,11 @@ class MergePPOWrapper(gym.Wrapper):
         # Encourage forward commitment while keeping the signal small enough
         # that PPO still respects highway-env's built-in merge reward.
         reward = env_reward
-        reward += 0.08 * min(max(speed, 0.0), 25.0)
+        reward += 0.04 * min(max(speed, 0.0), 20.0)
         reward += 0.03 * max(dx, 0.0)
         reward -= 0.05
+        if speed > 20.0:
+            reward -= 0.15 * (speed - 20.0)
         if speed < 0.5:
             reward -= 0.5
         if speed_clamped:
