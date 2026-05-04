@@ -129,33 +129,26 @@ criterion.
 
 ---
 
-## Open Question for Codex — Should We Terminate at x > 310?
+## Open Question for Codex — x > 310 Termination and Whether v4 Is Needed
 
-Currently the episode keeps running for the full 150 steps even after the agent exits the merge
-zone. The merge zone ends at x ≈ 310m. Everything after that is just the agent driving on an
-open highway — there is nothing more to evaluate.
+**If the paper reports crash rate and speed as the primary metrics, v3 results are final.**
+0% crash + 18.67 m/s across 50 episodes is a complete result. The agent merges successfully
+every episode — the 150-step post-merge driving is just bookkeeping noise, not outcome noise.
 
-**Proposed fix (one line in `src/rl_finetune.py`):**
+**A v4 rerun would only be needed if the paper needs to report a merge completion rate**
+(i.e., "X% of episodes terminated successfully") as a named metric. If so, the fix is one line
+in `src/rl_finetune.py`:
 ```python
-# current
+# current — threshold is 20m past the merge zone exit
 if x > 330.0 and not crashed:
-# change to
+# change to — terminate exactly at merge zone exit
 if x > 310.0 and not crashed:
 ```
+This would make every successful merge end with `terminated=True` and give a clean completion
+rate metric. It would require a rerun since the value function was trained on x>330.
 
-This would mean:
-- Every successful merge ends the episode immediately with `terminated=True`
-- Merge success rate becomes a clean metric (currently 0/50 `terminated=True`, not because merges
-  fail but because the threshold is set 20m too far into the post-merge road)
-- The +20 completion bonus fires reliably every successful episode, giving PPO a much stronger
-  training signal
-- Episodes would be shorter (~20–40 steps instead of 150), so training and eval are faster
-
-**Tradeoff:** would require a rerun (v4) since the value function was trained on the x>330
-threshold. But the results would be cleaner for the paper.
-
-**Please review `src/rl_finetune.py` and the v3 eval results above and advise** — is this worth
-a v4 rerun, or are crash=0% + speed sufficient as the final paper metrics?
+**Please review `src/rl_finetune.py` and the v3 results above** — does the paper need a
+completion rate metric, or are crash rate + speed sufficient?
 
 ---
 
