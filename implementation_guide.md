@@ -149,7 +149,13 @@ python3 src/rl_finetune.py --timesteps 100000 --eval-episodes 50 --traffic-mix d
 
 ## Phase 8: Baseline
 
-Create `baseline.py`. The baseline is independent 2-agent planning: the MPC plans separately for each human driver as if no other humans exist (i.e., `predict_other_responses` sees only one non-ego vehicle at a time). Re-run the same evaluation scenarios with this baseline and compare metrics.
+Implemented in `src/baseline.py`. The baseline is independent 2-agent planning: the MPC plans separately for each human driver as if no other humans exist (i.e., each non-ego vehicle predicts against ego only, ignoring other non-ego vehicles). Re-run the same evaluation scenarios with this baseline and compare metrics.
+
+```bash
+python3 src/baseline.py --episodes 20 --traffic-mix default_mix --seed 0
+```
+
+Default-mix result: 90% merge success, 0% crash, 10% short/timeouts, mean speed 5.85 m/s, mean merge step 50.1, clamp rate 37.5%. This is a useful baseline because it can merge safely, but it is slow and clamp-dependent compared with the PPO policy.
 
 ---
 

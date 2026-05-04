@@ -138,3 +138,29 @@ All models beat the mean-action baseline by ~30%.
 4. Question: Our MPC expert fixes steering to 0.0 — the ego is a highway vehicle that only needs to manage its speed, not change lanes. As a result, our BC network effectively only learns acceleration. Should we keep this as-is, or is there value in learning a steering signal too (e.g., for lane-keeping robustness in the PPO fine-tuning phase)?
 
 5. can we meet with u again pls
+
+---
+
+## In Progress: Phase 8 — Baseline
+
+**Implemented:** `src/baseline.py`
+
+**Baseline definition:** naive independent 2-agent planning. This is the Sadigh-style comparison point: for each non-ego vehicle, predict its response to the ego independently as if the other non-ego vehicles were absent. The ego then scores actions against the collection of those independent pairwise predictions. This preserves robot-human strategic planning but removes human-human interaction chains.
+
+**Why this baseline matters:** our project claims value from extending interaction-aware planning from one human to multiple interacting vehicles. The baseline asks what happens if we apply the original 2-agent idea naively to a multi-car merge.
+
+**Default-mix smoke result:** `python3 src/baseline.py --episodes 20 --traffic-mix default_mix --seed 0`
+
+| Metric | Independent 2-agent baseline |
+|---|---:|
+| Merge success rate (`x > 310`, no crash) | 90.0% |
+| Crash rate | 0.0% |
+| Short/timeout rate | 10.0% |
+| Mean speed | 5.85 m/s |
+| Mean steps | 65.7 |
+| Mean merge step | 50.1 |
+| Mean min distance | 5.43 m |
+| Mean min TTC | 0.59 s |
+| Clamp rate | 37.5% |
+
+**Interpretation:** the baseline can merge in most default-mix episodes, but it is slow and relies on the no-reverse clamp often. This gives us a meaningful comparison against PPO: PPO should preserve safety while improving speed/commitment and reducing clamp dependence.
