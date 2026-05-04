@@ -164,7 +164,14 @@ def load_bc_stats(bc_model: Path) -> tuple[np.ndarray, np.ndarray]:
     if not stats_path.exists():
         raise FileNotFoundError(f"Missing BC normalization stats: {stats_path}")
     stats = np.load(stats_path)
-    return stats["mean"], stats["std"]
+    mean = stats["mean"]
+    std = stats["std"]
+    # BC was trained on 27-dim obs. PPO adds ego_speed as 28th feature.
+    # Pad with mean=0, std=1 so ego_speed passes through unnormalized.
+    if len(mean) == 27:
+        mean = np.append(mean, 0.0)
+        std = np.append(std, 1.0)
+    return mean, std
 
 
 def warm_start_actor(ppo: PPO, bc_model_path: Path) -> bool:
@@ -182,7 +189,15 @@ def warm_start_actor(ppo: PPO, bc_model_path: Path) -> bool:
     ppo_linears = [policy_net[0], policy_net[2], policy_net[4], ppo.policy.action_net]
 
     with torch.no_grad():
-        for src, dst in zip(bc_linears, ppo_linears):
+        # First layer: BC expects 27 inputs, PPO now expects 28.
+        # Copy BC weights for the first 27 columns; zero the 28th (ego_speed)
+        # so the network starts behaving identically to BC.
+        src = bc_linears[0]
+        dst = ppo_linears[0]
+        dst.weight[:, :27].copy_(src.weight)
+        dst.weight[:, 27:].zero_()
+        dst.bias.copy_(src.bias)
+        for src, dst in zip(bc_linears[1:], ppo_linears[1:]):
             dst.weight.copy_(src.weight)
             dst.bias.copy_(src.bias)
         ppo.policy.log_std.fill_(-1.0)
