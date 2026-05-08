@@ -7,3 +7,18 @@ models/review_*
 models/ppo_*.zip
 __pycache__/
 *.pyc
+
+# Slide builder scripts and generated outputs (local only)
+make_editable_pptx.py
+*_slides.py
+*.pptx
+slides.tex
+slides.pdf
+*.aux *.log *.nav *.out *.snm *.toc
+
+# Demo outputs
+*.gif
+demo/
+logs/
+
+Autonomous Driving with Multi-Agent Lane Merging.pptx
