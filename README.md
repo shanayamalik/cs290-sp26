@@ -8,10 +8,6 @@ Extension of Sadigh et al. (2016) to multi-vehicle lane merging with 3+ agents. 
 
 Driver type parameters (in `src/driver_types.py`) are hand-tuned based on empirically observed ranges from Treiber et al. (2000) and map onto the Social Value Orientation taxonomy from Schwarting et al. (2019). They are not learned from data.
 
-**Progress:** Phases 1–9 complete. Pipeline: MPC expert → behavioral cloning → PPO fine-tuning → baseline comparison → final evaluation.
-See [implementation_guide.md](implementation_guide.md) for the full step-by-step implementation plan.
-See [nathan.md](nathan.md) for Phase 7 details and handoff notes.
-
 ---
 
 ## Setup
